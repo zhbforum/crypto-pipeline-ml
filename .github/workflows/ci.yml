@@ -24,7 +24,10 @@ jobs:
           if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
 
       - name: Lint (prospector)
-        run: prospector src
+        run: |
+          python -m pip show prospector || true
+          python -m prospector --version
+          python -m prospector src
 
       - name: Compile & import smoke test
         env:
