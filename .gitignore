@@ -145,7 +145,7 @@ env.bak/
 venv.bak/
 
 # Confluent creds
-config/client.properties
+src/config/client.properties
 
 # Spyder project settings
 .spyderproject
