@@ -1,9 +1,10 @@
 from typing import Dict
+import os
+from pathlib import Path
 
 
-MODE = "kline"
-
-INTERVAL = "1m"
+MODE = os.getenv("MODE", "kline")          
+INTERVAL = os.getenv("INTERVAL", "1m")
 
 PAIRS = [
     "BTCUSDT",
@@ -11,13 +12,22 @@ PAIRS = [
     # "BNBUSDT",
 ]
 
-EVERY_SEC = 5
+EVERY_SEC = int(os.getenv("EVERY_SEC", "5"))
+OUT_DIR = os.getenv("OUT_DIR", "data")
+CONCURRENCY = int(os.getenv("CONCURRENCY", "8"))
+BINANCE_BASE = os.getenv("BINANCE_BASE", "https://api.binance.com")
 
-OUT_DIR = "data"
+SINK = os.getenv("SINK", "csv+kafka")  
 
-CONCURRENCY = 8
+KAFKA_TOPIC = os.getenv("KAFKA_TOPIC", "topic_0")
+CLIENT_PROPERTIES_PATH = os.getenv("CLIENT_PROPERTIES_PATH", "./config/client.properties")
 
-BINANCE_BASE = "https://api.binance.com"
+_env_flag = os.getenv("KAFKA_ENABLED")  
+KAFKA_ENABLED = (
+    (_env_flag == "1")
+    or ("kafka" in SINK)
+    or (Path(CLIENT_PROPERTIES_PATH).exists() and _env_flag != "0")
+)
 
 _INTERVAL_MAP_SECONDS: Dict[str, int] = {
     "1m": 60,
