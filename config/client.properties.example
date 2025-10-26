@@ -1,0 +1,9 @@
+bootstrap.servers=YOUR_BOOTSTRAP_SERVER
+security.protocol=SASL_SSL
+sasl.mechanisms=PLAIN
+sasl.username=YOUR_API_KEY
+sasl.password=YOUR_API_SECRET
+
+session.timeout.ms=45000
+client.id=ccloud-python-client-local
+# debug=broker,security
