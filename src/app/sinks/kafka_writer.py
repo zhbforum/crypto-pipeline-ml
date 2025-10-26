@@ -65,7 +65,7 @@ class KafkaWriter:
         prod = Producer(conf)
         return cls(prod, topic)
 
-    def _on_delivery(self, err, msg):
+    def _on_delivery(self, err, _msg):
         if err:
             self._delivered_err += 1
             print(f"[kafka] delivery failed: {err}")
