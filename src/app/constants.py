@@ -19,7 +19,7 @@ BINANCE_BASE = os.getenv("BINANCE_BASE", "https://api.binance.com")
 
 SINK = os.getenv("SINK", "csv+kafka")  
 
-KAFKA_TOPIC = os.getenv("KAFKA_TOPIC", "binance_events")
+KAFKA_TOPIC = os.getenv("KAFKA_TOPIC", "topic_0")
 CLIENT_PROPERTIES_PATH = os.getenv("CLIENT_PROPERTIES_PATH", "./config/client.properties")
 
 _env_flag = os.getenv("KAFKA_ENABLED")  
