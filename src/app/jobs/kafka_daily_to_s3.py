@@ -79,7 +79,6 @@ def get_day_bounds_utc_ms(day_str: Optional[str]) -> Tuple[int, int, str]:
     return start_ms, end_ms, start_local.strftime("%Y-%m-%d")
 
 
-# pylint: disable=too-many-arguments, too-many-locals
 def compute_offsets_by_time(
     bootstrap: str,
     security_conf: Dict[str, str],
@@ -125,7 +124,6 @@ def compute_offsets_by_time(
             s_off = s_match.offset if (s_match and s_match.offset is not None and s_match.offset >= 0) else low
             e_off = e_match.offset if (e_match and e_match.offset is not None and e_match.offset >= 0) else high
 
-            # prospector/pylint: consider-using-max-builtin
             e_off = max(e_off, s_off)
 
             start_dict[str(p)] = s_off
@@ -175,7 +173,6 @@ def build_spark(app_name: str, aws_region: Optional[str]) -> SparkSession:
     return spark
 
 
-# pylint: disable=too-many-locals
 def main() -> None:
     parser = argparse.ArgumentParser(description="Daily Kafka → S3 batch job")
     parser.add_argument("--env-file", default=".env", help="Path to .env file")
