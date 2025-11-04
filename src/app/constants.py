@@ -1,6 +1,5 @@
 from __future__ import annotations
 import os
-from pathlib import Path
 from typing import Dict, Final, List
 import pytz
 
@@ -44,6 +43,7 @@ def interval_seconds(interval: str) -> int:
     if val is None:
         raise ValueError(f"Unsupported interval: {interval}")
     return val
+
 
 KAFKA_CONFIG: Final[Dict[str, str]] = {
     "bootstrap.servers": os.getenv("KAFKA_BOOTSTRAP"),

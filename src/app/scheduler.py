@@ -3,10 +3,8 @@ import asyncio
 from datetime import datetime, timezone
 from pathlib import Path
 from dotenv import load_dotenv
-load_dotenv(dotenv_path=Path(__file__).parent.parent / ".env")
 from app.timeutil import interval_seconds, sleep_until_next_boundary
 from app.exchange.binance_client import BinanceClient
-from app.sinks.csv_sink import CsvSink
 from app.services.collector import CollectorService
 from app.sinks.kafka_writer import KafkaWriter
 from app.constants import (
@@ -14,14 +12,13 @@ from app.constants import (
     INTERVAL,
     PAIRS,
     EVERY_SEC,
-    OUT_DIR,
     CONCURRENCY,
     BINANCE_BASE,
     KAFKA_ENABLED,
     KAFKA_TOPIC,
-    KAFKA_CONFIG,
 )
 
+load_dotenv(dotenv_path=Path(__file__).parent.parent / ".env")
 
 async def run() -> None:
     client = BinanceClient(
