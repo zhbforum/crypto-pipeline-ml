@@ -2,6 +2,8 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timezone
 from pathlib import Path
+from dotenv import load_dotenv
+load_dotenv(dotenv_path=Path(__file__).parent.parent / ".env")
 from app.timeutil import interval_seconds, sleep_until_next_boundary
 from app.exchange.binance_client import BinanceClient
 from app.sinks.csv_sink import CsvSink
@@ -17,7 +19,7 @@ from app.constants import (
     BINANCE_BASE,
     KAFKA_ENABLED,
     KAFKA_TOPIC,
-    CLIENT_PROPERTIES_PATH,
+    KAFKA_CONFIG,
 )
 
 
@@ -29,18 +31,18 @@ async def run() -> None:
     )
     svc = CollectorService(client)
 
-    if MODE == "ticker":
-        sink = CsvSink(
-            Path(OUT_DIR) / "binance_ticker.csv",
-            ["ts", "iso_ts", "symbol", "price"],
-        )
-    else:
-        sink = CsvSink(
-            Path(OUT_DIR) / f"binance_kline_{INTERVAL}.csv",
-            ["ts", "iso_ts", "symbol", "interval", "open", "high", "low", "close", "volume"],
-        )
-
-    kafka_writer = KafkaWriter.from_properties(CLIENT_PROPERTIES_PATH, KAFKA_TOPIC) if KAFKA_ENABLED else None
+    # if MODE == "ticker":
+    #     sink = CsvSink(
+    #         Path(OUT_DIR) / "binance_ticker.csv",
+    #         ["ts", "iso_ts", "symbol", "price"],
+    #     )
+    # else:
+    #     sink = CsvSink(
+    #         Path(OUT_DIR) / f"binance_kline_{INTERVAL}.csv",
+    #         ["ts", "iso_ts", "symbol", "interval", "open", "high", "low", "close", "volume"],
+    #     )
+    sink = None # Temporary disable CSV sink
+    kafka_writer = KafkaWriter.from_env(KAFKA_TOPIC) if KAFKA_ENABLED else None
 
     cycle = 0
     if MODE == "kline":

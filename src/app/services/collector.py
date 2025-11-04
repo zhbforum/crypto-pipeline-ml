@@ -35,7 +35,7 @@ class CollectorService:
                 ok += 1
         except Exception:
             pass
-        wrote = await sink.write(rows)
+        wrote = await sink.write(rows) if sink else 0
         return ok, len(pairs) - ok, wrote, rows
 
     async def one_cycle_kline(
@@ -60,7 +60,12 @@ class CollectorService:
                     "source": "binance",
                 }
             )
-        wrote = await sink.write(rows)
+            
+        if sink:
+            wrote = await sink.write(rows)
+        else:
+            wrote = 0
+            
         ok = len(rows)
         fail = len(pairs) - ok
         return ok, fail, wrote, rows

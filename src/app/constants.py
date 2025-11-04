@@ -1,5 +1,4 @@
 from __future__ import annotations
-
 import os
 from pathlib import Path
 from typing import Dict, Final, List
@@ -8,30 +7,23 @@ import pytz
 BERLIN: Final = pytz.timezone("Europe/Berlin")
 UTC: Final = pytz.utc
 
-MODE: Final[str] = os.getenv("MODE", "kline")
-INTERVAL: Final[str] = os.getenv("INTERVAL", "1m")
+MODE: Final[str] = "kline"
+INTERVAL: Final[str] = "1m"
+PAIRS: Final[List[str]] = ["BTCUSDT", "ETHUSDT"]
 
-PAIRS: Final[List[str]] = [
-    "BTCUSDT",
-    "ETHUSDT",
-]
+EVERY_SEC: Final[int] = 5
+OUT_DIR: Final[str] = "data"
+CONCURRENCY: Final[int] = 8
+BINANCE_BASE: Final[str] = "https://api.binance.com"
 
-EVERY_SEC: Final[int] = int(os.getenv("EVERY_SEC", "5"))
-OUT_DIR: Final[str] = os.getenv("OUT_DIR", "data")
-CONCURRENCY: Final[int] = int(os.getenv("CONCURRENCY", "8"))
-BINANCE_BASE: Final[str] = os.getenv("BINANCE_BASE", "https://api.binance.com")
+SINK: Final[str] = "csv+kafka"
 
-SINK: Final[str] = os.getenv("SINK", "csv+kafka")
-
-KAFKA_TOPIC: Final[str] = os.getenv("KAFKA_TOPIC", "topic_0")
-CLIENT_PROPERTIES_PATH: Final[str] = os.getenv("CLIENT_PROPERTIES_PATH", "./config/client.properties")
+KAFKA_TOPIC: Final[str] = "topic_0"
 
 _env_flag = os.getenv("KAFKA_ENABLED")
-KAFKA_ENABLED: Final[bool] = (
-    (_env_flag == "1")
-    or ("kafka" in SINK)
-    or (Path(CLIENT_PROPERTIES_PATH).exists() and _env_flag != "0")
-)
+KAFKA_ENABLED: Final[bool] = (_env_flag == "1") or ("kafka" in SINK)
+
+
 
 _INTERVAL_MAP_SECONDS: Final[Dict[str, int]] = {
     "1m": 60,
@@ -52,3 +44,13 @@ def interval_seconds(interval: str) -> int:
     if val is None:
         raise ValueError(f"Unsupported interval: {interval}")
     return val
+
+KAFKA_CONFIG: Final[Dict[str, str]] = {
+    "bootstrap.servers": os.getenv("KAFKA_BOOTSTRAP"),
+    "security.protocol": os.getenv("KAFKA_SECURITY_PROTOCOL", "SASL_SSL"),
+    "sasl.mechanism": os.getenv("KAFKA_SASL_MECHANISM", "PLAIN"),
+    "sasl.username": os.getenv("KAFKA_USERNAME"),
+    "sasl.password": os.getenv("KAFKA_PASSWORD"),
+    "session.timeout.ms": os.getenv("KAFKA_SESSION_TIMEOUT_MS", "45000"),
+    "client.id": os.getenv("KAFKA_CLIENT_ID", "binance-collector"),
+}
