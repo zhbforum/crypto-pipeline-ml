@@ -6,7 +6,7 @@ import io
 import os
 import zipfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Iterable, List, Optional, Tuple
 
@@ -15,54 +15,20 @@ from dotenv import load_dotenv
 from pyspark import SparkConf
 from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql import functions as F
-from pyspark.sql.types import (
-    StructField,
-    StructType,
-    StringType,
-    LongType,
-    DoubleType,
+from pyspark.sql.types import StructField, StructType, StringType, LongType, DoubleType
+
+from app.parser_settings.constants import (
+    BINANCE_BASE_URL,
+    DEFAULT_AWS_REGION,
+    DEFAULT_S3_BUCKET,
+    DEFAULT_S3_PREFIX,
+    DEFAULT_BINANCE_INTERVAL,
+    DEFAULT_BINANCE_SYMBOLS,
+    DEFAULT_BINANCE_START_DATE,
+    DEFAULT_BINANCE_END_DATE,
+    DEFAULT_APP_NAME,
+    DEFAULT_DOWNLOAD_WORKERS,
 )
-
-BINANCE_BASE_URL = "https://data.binance.vision"
-
-
-def _get_env_str(
-    key: str,
-    default: Optional[str] = None,
-    *,
-    required: bool = False,
-) -> str:
-    val = os.getenv(key, default)
-    if (val is None or val == "") and required:
-        raise SystemExit(f"Missing required env var: {key}")
-    return "" if val is None else val
-
-
-def _build_spark(app_name: str) -> SparkSession:
-    conf = (
-        SparkConf()
-        .setAppName(app_name)
-        .set("spark.sql.session.timeZone", "UTC")
-    )
-
-    region = _get_env_str("AWS_DEFAULT_REGION", "eu-central-1")
-
-    conf = (
-        conf.set("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem")
-        .set(
-            "spark.hadoop.fs.s3a.aws.credentials.provider",
-            "org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider",
-        )
-        .set("spark.hadoop.fs.s3a.access.key", _get_env_str("AWS_ACCESS_KEY_ID", ""))
-        .set(
-            "spark.hadoop.fs.s3a.secret.key",
-            _get_env_str("AWS_SECRET_ACCESS_KEY", ""),
-        )
-        .set("spark.hadoop.fs.s3a.endpoint", f"s3.{region}.amazonaws.com")
-    )
-
-    return SparkSession.builder.config(conf=conf).getOrCreate()
-
 
 ROWS_SCHEMA = StructType(
     [
@@ -79,30 +45,72 @@ ROWS_SCHEMA = StructType(
 )
 
 
-def _iter_days(start: date, end: date) -> Iterable[date]:
-    cur = start
-    while cur <= end:
+def _get_env_str(
+    key: str,
+    default: Optional[str] = None,
+    *,
+    required: bool = False,
+) -> str:
+    val = os.getenv(key, default)
+    if (val is None or val == "") and required:
+        raise SystemExit(f"Missing required env var: {key}")
+    return "" if val is None else val
+
+
+def _build_spark(app_name: str) -> SparkSession:
+    conf = SparkConf().setAppName(app_name).set("spark.sql.session.timeZone", "UTC")
+
+    region = os.getenv("AWS_DEFAULT_REGION", DEFAULT_AWS_REGION)
+    conf = (
+        conf.set("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem")
+        .set(
+            "spark.hadoop.fs.s3a.aws.credentials.provider",
+            "org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider",
+        )
+        .set(
+            "spark.hadoop.fs.s3a.access.key",
+            _get_env_str("AWS_ACCESS_KEY_ID", required=True),
+        )
+        .set(
+            "spark.hadoop.fs.s3a.secret.key",
+            _get_env_str("AWS_SECRET_ACCESS_KEY", required=True),
+        )
+        .set("spark.hadoop.fs.s3a.endpoint", f"s3.{region}.amazonaws.com")
+    )
+
+    return SparkSession.builder.config(conf=conf).getOrCreate()
+
+
+def _iter_months(start: date, end: date) -> Iterable[date]:
+    cur = start.replace(day=1)
+    end_m = end.replace(day=1)
+    while cur <= end_m:
         yield cur
-        cur += timedelta(days=1)
+        if cur.month == 12:
+            cur = cur.replace(year=cur.year + 1, month=1, day=1)
+        else:
+            cur = cur.replace(month=cur.month + 1, day=1)
 
 
-def _fetch_binance_zip(symbol: str, day: date) -> Optional[bytes]:
-    path = f"/data/spot/daily/klines/{symbol}/1m/{symbol}-1m-{day.isoformat()}.zip"
+def _fetch_binance_month_zip(symbol: str, month_day: date, interval: str) -> Optional[bytes]:
+    ym = month_day.strftime("%Y-%m")
+    path = f"/data/spot/monthly/klines/{symbol}/{interval}/{symbol}-{interval}-{ym}.zip"
     url = BINANCE_BASE_URL + path
+    print(f"[info] request: {url}")
     try:
-        resp = requests.get(url, timeout=30)
+        resp = requests.get(url, timeout=60)
     except requests.RequestException as exc:
-        print(f"[WARN] request failed for {symbol} {day}: {exc}")
+        print(f"[WARN] request failed for {symbol} {ym}: {exc}")
         return None
 
     if resp.status_code != 200:
-        print(f"[WARN] no data for {symbol} {day} (status={resp.status_code})")
+        print(f"[WARN] no data for {symbol} {ym} (status={resp.status_code})")
         return None
 
     return resp.content
 
 
-def _parse_kline_csv(symbol: str, content: bytes) -> List[Tuple]:
+def _parse_kline_csv(symbol: str, content: bytes, interval: str) -> List[Tuple]:
     out: List[Tuple] = []
 
     try:
@@ -111,120 +119,109 @@ def _parse_kline_csv(symbol: str, content: bytes) -> List[Tuple]:
         print(f"[WARN] bad zip for {symbol}: {e}")
         return out
 
-    with zf:
-        names = zf.namelist()
-        if not names:
-            return out
+    names = zf.namelist()
+    if not names:
+        return out
 
-        with zf.open(names[0]) as f:
-            reader = csv.reader(io.TextIOWrapper(f, "utf-8"))
-            for i, row in enumerate(reader):
-                if not row:
-                    continue
+    with zf.open(names[0]) as f:
+        reader = csv.reader(io.TextIOWrapper(f, "utf-8"))
+        for i, row in enumerate(reader):
+            if not row:
+                continue
 
-                try:
-                    open_time_raw = int(row[0])
-                except (ValueError, TypeError) as e:
-                    print(f"[WARN] bad open_time for {symbol} row={i}: {row} ({e})")
-                    continue
+            try:
+                open_time_raw = int(row[0])
+            except (ValueError, TypeError) as e:
+                print(f"[WARN] bad open_time for {symbol} row={i}: {row} ({e})")
+                continue
 
-                if open_time_raw > 10**13:
-                    open_time_ms = open_time_raw // 1000
-                else:
-                    open_time_ms = open_time_raw
+            open_time_ms = open_time_raw // 1000 if open_time_raw > 10**13 else open_time_raw
 
-                if open_time_ms < 1483228800000 or open_time_ms > 4102444800000:
-                    print(
-                        f"[WARN] out-of-range open_time_ms={open_time_ms} "
-                        f"for {symbol} row={i}: {row}"
-                    )
-                    continue
-
-                try:
-                    iso_ts = (
-                        datetime.utcfromtimestamp(open_time_ms / 1000)
-                        .isoformat()
-                        + "Z"
-                    )
-                except OSError as e:
-                    print(
-                        f"[WARN] utcfromtimestamp failed for {symbol} "
-                        f"row={i} ts={open_time_ms}: {e}"
-                    )
-                    continue
-
-                try:
-                    o, h, l, c = map(float, row[1:5])
-                    vol = float(row[5])
-                except (ValueError, TypeError, IndexError) as e:
-                    print(
-                        f"[WARN] bad OHLCV for {symbol} row={i}: {row} ({e})"
-                    )
-                    continue
-
-                out.append(
-                    (
-                        open_time_ms,
-                        iso_ts,
-                        symbol,
-                        "1m",
-                        o,
-                        h,
-                        l,
-                        c,
-                        vol,
-                    )
+            if not (1483228800000 <= open_time_ms <= 4102444800000):
+                print(
+                    f"[WARN] out-of-range open_time_ms={open_time_ms} "
+                    f"for {symbol} row={i}: {row}"
                 )
+                continue
+
+            try:
+                dt_utc = datetime.fromtimestamp(open_time_ms / 1000, tz=timezone.utc)
+                iso_ts = dt_utc.isoformat().replace("+00:00", "Z")
+            except OSError as e:
+                print(
+                    f"[WARN] fromtimestamp failed for {symbol} "
+                    f"row={i} ts={open_time_ms}: {e}"
+                )
+                continue
+
+            try:
+                o, h, l, c = map(float, row[1:5])
+                vol = float(row[5])
+            except (ValueError, TypeError, IndexError) as e:
+                print(
+                    f"[WARN] bad OHLCV for {symbol} row={i}: {row} ({e})"
+                )
+                continue
+
+            out.append(
+                (
+                    open_time_ms,
+                    iso_ts,
+                    symbol,
+                    interval,
+                    o,
+                    h,
+                    l,
+                    c,
+                    vol,
+                )
+            )
 
     return out
 
 
-def _load_day_for_symbols(
+def _load_month_for_symbols(
     symbols: Iterable[str],
-    day: date,
+    month_day: date,
+    interval: str,
     max_workers: int = 5,
 ) -> List[Tuple]:
+    ym = month_day.strftime("%Y-%m")
+
     def fetch_for_symbol(sym: str) -> List[Tuple]:
-        print(f"[info] fetching {sym} {day}")
-        content = _fetch_binance_zip(sym, day)
-        if content is None:
-            return []
-        return _parse_kline_csv(sym, content)
+        print(f"[info] fetching {sym} {ym} ({interval})")
+        content = _fetch_binance_month_zip(sym, month_day, interval)
+        return [] if content is None else _parse_kline_csv(sym, content, interval)
 
     all_rows: List[Tuple] = []
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {executor.submit(fetch_for_symbol, s): s for s in symbols}
         for fut in as_completed(futures):
-            rows = fut.result()
-            all_rows.extend(rows)
+            all_rows.extend(fut.result())
 
     return all_rows
 
 
-def _flush_buffer_to_s3(
+def _flush_month_to_s3(
     spark: SparkSession,
     rows_buffer: List[Tuple],
     raw_base: str,
-    topic: str,
+    year_month: str,
 ) -> None:
     if not rows_buffer:
+        print(f"[info] no rows to flush for {year_month}")
         return
 
-    num_rows = len(rows_buffer)
-    print(f"[info] flushing buffer to S3 (rows={num_rows})")
+    print(f"[info] flushing month {year_month} to S3 (rows={len(rows_buffer)})")
 
     df = spark.createDataFrame(rows_buffer, schema=ROWS_SCHEMA)
+    symbols = sorted({row[2] for row in rows_buffer})
 
-    ts_utc = (F.col("ts") / F.lit(1000)).cast("timestamp")
-    ts_berlin = F.from_utc_timestamp(ts_utc, "Europe/Berlin")
-    df = df.withColumn("date", F.to_date(ts_berlin))
-
-    df = df.withColumn("topic", F.lit(topic))
-    df = df.withColumn(
-        "value",
-        F.to_json(
-            F.struct(
+    for sym in symbols:
+        sub_df: DataFrame = (
+            df.filter(F.col("symbol") == sym)
+            .select(
                 "ts",
                 "iso_ts",
                 "symbol",
@@ -235,114 +232,101 @@ def _flush_buffer_to_s3(
                 "close",
                 "volume",
             )
-        ),
-    )
+            .orderBy("ts")
+        )
 
-    out_df: DataFrame = df.select("topic", "date", "value")
+        out_path = f"{raw_base}/symbol={sym}/month={year_month}"
+        print(f"[info] writing {sym} {year_month} to {out_path}")
 
-    (
-        out_df.write.format("parquet")
-        .mode("append")
-        .partitionBy("topic", "date")
-        .save(raw_base)
-    )
+        (
+            sub_df.coalesce(1)
+            .write.mode("overwrite")
+            .option("header", "true")
+            .option("compression", "snappy")
+            .csv(out_path)
+        )
 
-    print(f"[ok] written chunk to {raw_base} (rows={num_rows})")
-
-    rows_buffer.clear()
+    print(f"[ok] written monthly CSVs for {year_month} to {raw_base}")
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Backfill Binance Vision 1m klines into raw/topic=.../date=..."
+        description=(
+            "Backfill Binance monthly klines into "
+            "s3a://BUCKET/PREFIX/symbol=SYM/month=YYYY-MM as CSV (snappy)"
+        )
     )
     parser.add_argument("--start-date", help="YYYY-MM-DD", default=None)
     parser.add_argument("--end-date", help="YYYY-MM-DD", default=None)
+    parser.add_argument("--symbols", help="Comma-separated: BTCUSDT,ETHUSDT,...", default=None)
     parser.add_argument(
-        "--symbols",
-        help="Comma-separated list: BTCUSDT,ETHUSDT,...",
-        default=None,
-    )
-    parser.add_argument(
-        "--topic",
-        help="topic partition name in raw (e.g. topic_0)",
+        "--interval",
+        help="Binance kline interval (1m,3m,5m...). Default: from constants / env",
         default=None,
     )
 
     args = parser.parse_args()
 
     base_dir = Path(__file__).resolve().parent
-    dotenv_path = base_dir / ".env"
-    load_dotenv(dotenv_path=dotenv_path, override=True)
-    print(f"[info] loaded dotenv from {dotenv_path}")
+    load_dotenv(dotenv_path=base_dir / ".env", override=True)
+    print(f"[info] loaded dotenv from {base_dir / '.env'}")
 
-    bucket = _get_env_str("S3_BUCKET", required=True)
-    s3_prefix = _get_env_str("S3_PREFIX", "raw") or "raw"
+    bucket = _get_env_str("S3_BUCKET", DEFAULT_S3_BUCKET, required=True)
+    s3_prefix = os.getenv("S3_PREFIX", DEFAULT_S3_PREFIX) or DEFAULT_S3_PREFIX
     raw_base = f"s3a://{bucket}/{s3_prefix}"
 
-    topic = args.topic or _get_env_str("KAFKA_TOPIC", "topic_0") or "topic_0"
+    interval = (
+        args.interval
+        or os.getenv("BINANCE_INTERVAL", DEFAULT_BINANCE_INTERVAL)
+        or DEFAULT_BINANCE_INTERVAL
+    )
 
     if args.symbols:
         symbols = [s.strip() for s in args.symbols.split(",") if s.strip()]
     else:
-        env_syms = _get_env_str("BINANCE_SYMBOLS", "")
-        if env_syms:
-            symbols = [s.strip() for s in env_syms.split(",") if s.strip()]
-        else:
-            symbols = [
-                "BTCUSDT",
-                "ETHUSDT",
-                "XRPUSDT",
-                "SOLUSDT",
-                "BNBUSDT",
-                "DOGEUSDT",
-                "LTCUSDT",
-                "ADAUSDT",
-                "TRXUSDT",
-                "LINKUSDT",
-            ]
+        env_syms = os.getenv("BINANCE_SYMBOLS", "")
+        symbols = (
+            [s.strip() for s in env_syms.split(",") if s.strip()]
+            if env_syms
+            else DEFAULT_BINANCE_SYMBOLS
+        )
 
-    download_workers = int(os.getenv("DOWNLOAD_WORKERS", "5"))
+    download_workers = int(os.getenv("DOWNLOAD_WORKERS", str(DEFAULT_DOWNLOAD_WORKERS)))
 
     start_str = (
         args.start_date
-        or _get_env_str("BINANCE_START_DATE", "2022-12-31")
-        or "2022-12-31"
+        or os.getenv("BINANCE_START_DATE", DEFAULT_BINANCE_START_DATE)
+        or DEFAULT_BINANCE_START_DATE
     )
-    end_str = args.end_date or _get_env_str("BINANCE_END_DATE", "") or None
+    end_env = os.getenv("BINANCE_END_DATE", DEFAULT_BINANCE_END_DATE)
+    end_str = args.end_date or (end_env if end_env else None)
 
     start_day = date.fromisoformat(start_str)
     end_day = date.fromisoformat(end_str) if end_str else date.today()
 
-    app_name = _get_env_str("APP_NAME", "binance_vision_backfill_raw") or "binance_vision_backfill_raw"
+    app_name = os.getenv("APP_NAME", DEFAULT_APP_NAME) or DEFAULT_APP_NAME
     spark = _build_spark(app_name)
 
+    print(f"[info] app_name: {app_name}")
     print(f"[info] raw_base: {raw_base}")
-    print(f"[info] topic: {topic}")
     print(f"[info] symbols: {symbols}")
-    print(f"[info] date range: {start_day} .. {end_day}")
+    print(f"[info] interval: {interval}")
+    print(f"[info] date range (months): {start_day} .. {end_day}")
     print(f"[info] download_workers: {download_workers}")
 
-    rows_buffer: List[Tuple] = []
+    for month_day in _iter_months(start_day, end_day):
+        ym_str = month_day.strftime("%Y-%m")
+        print(f"[info] processing month {ym_str}")
 
-    current_year = start_day.year
-    current_month = start_day.month
+        rows = _load_month_for_symbols(symbols, month_day, interval, max_workers=download_workers)
+        if not rows:
+            print(f"[info] no rows for month {ym_str}, skipping")
+            continue
 
-    for day in _iter_days(start_day, end_day):
-        rows = _load_day_for_symbols(symbols, day, max_workers=download_workers)
-        if rows:
-            rows_buffer.extend(rows)
-
-        next_day = day + timedelta(days=1)
-        month_changed = (next_day.month != current_month or next_day.year != current_year)
-        is_last_day = day >= end_day
-
-        if month_changed or is_last_day:
-            _flush_buffer_to_s3(spark, rows_buffer, raw_base, topic)
-            current_year = next_day.year
-            current_month = next_day.month
+        _flush_month_to_s3(spark, rows, raw_base, ym_str)
 
     spark.stop()
+    print("[info] done")
 
 
 if __name__ == "__main__":
