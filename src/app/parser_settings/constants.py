@@ -19,5 +19,9 @@ DEFAULT_S3_PREFIX = "raw"
 
 # --- Spark / App ---
 
-DEFAULT_APP_NAME = "binance_vision_backfill_monthly_csv"
+DEFAULT_APP_NAME = "silver_validate"
 DEFAULT_DOWNLOAD_WORKERS = 5
+
+VALIDATE_START_DATE="2022-12-31"
+VALIDATE_END_DATE="2025-11-18"
+S3_PREFIX_SILVER="silver"
