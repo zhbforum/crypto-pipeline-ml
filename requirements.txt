@@ -3,3 +3,5 @@ confluent-kafka>=2.6.0
 pyspark>=4.0.1
 python-dotenv>=1.0
 pytz
+pmdarima>=2.0.0
+requests>=2.31,<3
