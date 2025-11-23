@@ -6,6 +6,7 @@ import io
 import os
 import zipfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Iterable, List, Optional, Tuple
@@ -92,7 +93,9 @@ def _iter_months(start: date, end: date) -> Iterable[date]:
             cur = cur.replace(month=cur.month + 1, day=1)
 
 
-def _fetch_binance_month_zip(symbol: str, month_day: date, interval: str) -> Optional[bytes]:
+def _fetch_binance_month_zip(
+    symbol: str, month_day: date, interval: str
+) -> Optional[bytes]:
     ym = month_day.strftime("%Y-%m")
     path = f"/data/spot/monthly/klines/{symbol}/{interval}/{symbol}-{interval}-{ym}.zip"
     url = BINANCE_BASE_URL + path
@@ -110,72 +113,78 @@ def _fetch_binance_month_zip(symbol: str, month_day: date, interval: str) -> Opt
     return resp.content
 
 
+def _parse_single_kline_row(
+    symbol: str,
+    interval: str,
+    row: List[str],
+    row_index: int,
+) -> Optional[Tuple]:
+    if not row:
+        return None
+
+    try:
+        open_time_raw = int(row[0])
+    except (ValueError, TypeError) as exc:
+        print(f"[WARN] bad open_time for {symbol} row={row_index}: {row} ({exc})")
+        return None
+
+    open_time_ms = open_time_raw // 1000 if open_time_raw > 10**13 else open_time_raw
+
+    if not (1483228800000 <= open_time_ms <= 4102444800000):
+        print(
+            f"[WARN] out-of-range open_time_ms={open_time_ms} "
+            f"for {symbol} row={row_index}: {row}"
+        )
+        return None
+
+    try:
+        dt_utc = datetime.fromtimestamp(open_time_ms / 1000, tz=timezone.utc)
+        iso_ts = dt_utc.isoformat().replace("+00:00", "Z")
+    except OSError as exc:
+        print(
+            f"[WARN] fromtimestamp failed for {symbol} "
+            f"row={row_index} ts={open_time_ms}: {exc}"
+        )
+        return None
+
+    try:
+        o, h, l, c = map(float, row[1:5])
+        vol = float(row[5])
+    except (ValueError, TypeError, IndexError) as exc:
+        print(f"[WARN] bad OHLCV for {symbol} row={row_index}: {row} ({exc})")
+        return None
+
+    return (
+        open_time_ms,
+        iso_ts,
+        symbol,
+        interval,
+        o,
+        h,
+        l,
+        c,
+        vol,
+    )
+
+
 def _parse_kline_csv(symbol: str, content: bytes, interval: str) -> List[Tuple]:
     out: List[Tuple] = []
 
     try:
-        zf = zipfile.ZipFile(io.BytesIO(content))
-    except zipfile.BadZipFile as e:
-        print(f"[WARN] bad zip for {symbol}: {e}")
+        with zipfile.ZipFile(io.BytesIO(content)) as zf:
+            names = zf.namelist()
+            if not names:
+                return out
+
+            with zf.open(names[0]) as f:
+                reader = csv.reader(io.TextIOWrapper(f, "utf-8"))
+                for i, row in enumerate(reader):
+                    parsed = _parse_single_kline_row(symbol, interval, row, i)
+                    if parsed is not None:
+                        out.append(parsed)
+    except zipfile.BadZipFile as exc:
+        print(f"[WARN] bad zip for {symbol}: {exc}")
         return out
-
-    names = zf.namelist()
-    if not names:
-        return out
-
-    with zf.open(names[0]) as f:
-        reader = csv.reader(io.TextIOWrapper(f, "utf-8"))
-        for i, row in enumerate(reader):
-            if not row:
-                continue
-
-            try:
-                open_time_raw = int(row[0])
-            except (ValueError, TypeError) as e:
-                print(f"[WARN] bad open_time for {symbol} row={i}: {row} ({e})")
-                continue
-
-            open_time_ms = open_time_raw // 1000 if open_time_raw > 10**13 else open_time_raw
-
-            if not (1483228800000 <= open_time_ms <= 4102444800000):
-                print(
-                    f"[WARN] out-of-range open_time_ms={open_time_ms} "
-                    f"for {symbol} row={i}: {row}"
-                )
-                continue
-
-            try:
-                dt_utc = datetime.fromtimestamp(open_time_ms / 1000, tz=timezone.utc)
-                iso_ts = dt_utc.isoformat().replace("+00:00", "Z")
-            except OSError as e:
-                print(
-                    f"[WARN] fromtimestamp failed for {symbol} "
-                    f"row={i} ts={open_time_ms}: {e}"
-                )
-                continue
-
-            try:
-                o, h, l, c = map(float, row[1:5])
-                vol = float(row[5])
-            except (ValueError, TypeError, IndexError) as e:
-                print(
-                    f"[WARN] bad OHLCV for {symbol} row={i}: {row} ({e})"
-                )
-                continue
-
-            out.append(
-                (
-                    open_time_ms,
-                    iso_ts,
-                    symbol,
-                    interval,
-                    o,
-                    h,
-                    l,
-                    c,
-                    vol,
-                )
-            )
 
     return out
 
@@ -249,7 +258,18 @@ def _flush_month_to_s3(
     print(f"[ok] written monthly CSVs for {year_month} to {raw_base}")
 
 
-def main() -> None:
+@dataclass
+class VisionBackfillConfig:
+    app_name: str
+    raw_base: str
+    interval: str
+    symbols: List[str]
+    start_day: date
+    end_day: date
+    download_workers: int
+
+
+def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Backfill Binance monthly klines into "
@@ -258,15 +278,43 @@ def main() -> None:
     )
     parser.add_argument("--start-date", help="YYYY-MM-DD", default=None)
     parser.add_argument("--end-date", help="YYYY-MM-DD", default=None)
-    parser.add_argument("--symbols", help="Comma-separated: BTCUSDT,ETHUSDT,...", default=None)
+    parser.add_argument(
+        "--symbols", help="Comma-separated: BTCUSDT,ETHUSDT,...", default=None
+    )
     parser.add_argument(
         "--interval",
         help="Binance kline interval (1m,3m,5m...). Default: from constants / env",
         default=None,
     )
+    return parser.parse_args()
 
-    args = parser.parse_args()
 
+def _resolve_symbols(args: argparse.Namespace) -> List[str]:
+    if args.symbols:
+        return [s.strip() for s in args.symbols.split(",") if s.strip()]
+
+    env_syms = os.getenv("BINANCE_SYMBOLS", "")
+    if env_syms:
+        return [s.strip() for s in env_syms.split(",") if s.strip()]
+
+    return DEFAULT_BINANCE_SYMBOLS
+
+
+def _resolve_date_range(args: argparse.Namespace) -> Tuple[date, date]:
+    start_str = (
+        args.start_date
+        or os.getenv("BINANCE_START_DATE", DEFAULT_BINANCE_START_DATE)
+        or DEFAULT_BINANCE_START_DATE
+    )
+    end_env = os.getenv("BINANCE_END_DATE", DEFAULT_BINANCE_END_DATE)
+    end_str = args.end_date or (end_env if end_env else None)
+
+    start_day = date.fromisoformat(start_str)
+    end_day = date.fromisoformat(end_str) if end_str else date.today()
+    return start_day, end_day
+
+
+def _build_backfill_config(args: argparse.Namespace) -> VisionBackfillConfig:
     base_dir = Path(__file__).resolve().parent
     load_dotenv(dotenv_path=base_dir / ".env", override=True)
     print(f"[info] loaded dotenv from {base_dir / '.env'}")
@@ -281,49 +329,51 @@ def main() -> None:
         or DEFAULT_BINANCE_INTERVAL
     )
 
-    if args.symbols:
-        symbols = [s.strip() for s in args.symbols.split(",") if s.strip()]
-    else:
-        env_syms = os.getenv("BINANCE_SYMBOLS", "")
-        symbols = (
-            [s.strip() for s in env_syms.split(",") if s.strip()]
-            if env_syms
-            else DEFAULT_BINANCE_SYMBOLS
-        )
-
+    symbols = _resolve_symbols(args)
     download_workers = int(os.getenv("DOWNLOAD_WORKERS", str(DEFAULT_DOWNLOAD_WORKERS)))
 
-    start_str = (
-        args.start_date
-        or os.getenv("BINANCE_START_DATE", DEFAULT_BINANCE_START_DATE)
-        or DEFAULT_BINANCE_START_DATE
-    )
-    end_env = os.getenv("BINANCE_END_DATE", DEFAULT_BINANCE_END_DATE)
-    end_str = args.end_date or (end_env if end_env else None)
-
-    start_day = date.fromisoformat(start_str)
-    end_day = date.fromisoformat(end_str) if end_str else date.today()
-
+    start_day, end_day = _resolve_date_range(args)
     app_name = os.getenv("APP_NAME", DEFAULT_APP_NAME) or DEFAULT_APP_NAME
-    spark = _build_spark(app_name)
 
-    print(f"[info] app_name: {app_name}")
-    print(f"[info] raw_base: {raw_base}")
-    print(f"[info] symbols: {symbols}")
-    print(f"[info] interval: {interval}")
-    print(f"[info] date range (months): {start_day} .. {end_day}")
-    print(f"[info] download_workers: {download_workers}")
+    return VisionBackfillConfig(
+        app_name=app_name,
+        raw_base=raw_base,
+        interval=interval,
+        symbols=symbols,
+        start_day=start_day,
+        end_day=end_day,
+        download_workers=download_workers,
+    )
 
-    for month_day in _iter_months(start_day, end_day):
+
+def main() -> None:
+    args = _parse_args()
+    config = _build_backfill_config(args)
+
+    spark = _build_spark(config.app_name)
+
+    print(f"[info] app_name: {config.app_name}")
+    print(f"[info] raw_base: {config.raw_base}")
+    print(f"[info] symbols: {config.symbols}")
+    print(f"[info] interval: {config.interval}")
+    print(f"[info] date range (months): {config.start_day} .. {config.end_day}")
+    print(f"[info] download_workers: {config.download_workers}")
+
+    for month_day in _iter_months(config.start_day, config.end_day):
         ym_str = month_day.strftime("%Y-%m")
         print(f"[info] processing month {ym_str}")
 
-        rows = _load_month_for_symbols(symbols, month_day, interval, max_workers=download_workers)
+        rows = _load_month_for_symbols(
+            config.symbols,
+            month_day,
+            config.interval,
+            max_workers=config.download_workers,
+        )
         if not rows:
             print(f"[info] no rows for month {ym_str}, skipping")
             continue
 
-        _flush_month_to_s3(spark, rows, raw_base, ym_str)
+        _flush_month_to_s3(spark, rows, config.raw_base, ym_str)
 
     spark.stop()
     print("[info] done")
