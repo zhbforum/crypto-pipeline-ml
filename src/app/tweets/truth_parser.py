@@ -2,20 +2,14 @@ import json
 import os
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, Iterable, List, Tuple
 
 from dotenv import load_dotenv
 from pyspark.sql import SparkSession
 from pyspark.sql.types import (
-    StructType,
-    StructField,
-    StringType,
-    BooleanType,
-    DoubleType,
-    IntegerType,
-    ArrayType,
+    StructType, StructField, StringType, BooleanType,
+    DoubleType, IntegerType, ArrayType,
 )
-
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 
 from app.parser_settings.constants import (
@@ -26,12 +20,8 @@ from app.parser_settings.constants import (
     ECONOMIC_MACRO_KEYWORDS,
 )
 
-
 TRUMP_HANDLE = "@realDonaldTrump"
 START_DATE = datetime(2025, 1, 20, tzinfo=timezone.utc)
-
-S3_BUCKET = DEFAULT_S3_BUCKET
-S3_PREFIX = f"{DEFAULT_S3_PREFIX}/events/source=truthsocial/user=realDonaldTrump"
 
 NEUTRAL_LOWER = -0.3
 NEUTRAL_UPPER = 0.3
@@ -40,9 +30,6 @@ analyzer = SentimentIntensityAnalyzer()
 
 CURRENT_FILE = Path(__file__).resolve()
 LOCAL_JSONL_PATH = CURRENT_FILE.parents[3] / "data" / "trump_truthsocial_since_2025-01-20.jsonl"
-
-
-print(f"[DEBUG] Using JSONL file: {LOCAL_JSONL_PATH}")
 
 EVENT_SCHEMA = StructType([
     StructField("event_type",            StringType(),  False),
@@ -76,7 +63,7 @@ def init_spark() -> SparkSession:
     if not aws_key or not aws_secret:
         raise RuntimeError("AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY not set")
 
-    spark = (
+    return (
         SparkSession.builder
         .appName("trump_truths_sentiment")
         .config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem")
@@ -89,57 +76,36 @@ def init_spark() -> SparkSession:
         .getOrCreate()
     )
 
-    return spark
 
+def parse_date_utc(date_str: str) -> datetime:
+    dt = datetime.fromisoformat(date_str)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
 
 
 def is_economic_post(text: str) -> bool:
     t = text.lower()
-
-    if any(k in t for k in ECONOMIC_CRYPTO_KEYWORDS):
-        return True
-
-    if any(k in t for k in ECONOMIC_MACRO_KEYWORDS):
-        return True
-
-    return False
+    return any(k in t for k in ECONOMIC_CRYPTO_KEYWORDS) or any(k in t for k in ECONOMIC_MACRO_KEYWORDS)
 
 
 def economic_categories(text: str) -> List[str]:
     t = text.lower()
     cats: List[str] = []
-
     if any(k in t for k in ECONOMIC_CRYPTO_KEYWORDS):
         cats.append("crypto")
-
     if any(k in t for k in ECONOMIC_MACRO_KEYWORDS):
         cats.append("macro")
-
-    if cats:
-        return cats
-
-    return ["other_econ"]
+    return cats or ["other_econ"]
 
 
 def compute_sentiment(text: str) -> Dict[str, Any]:
-    scores = analyzer.polarity_scores(text)
-    score = float(scores["compound"])
-
+    score = float(analyzer.polarity_scores(text)["compound"])
     if score >= NEUTRAL_UPPER:
-        label = "positive"
-        index = 1
-    elif score <= NEUTRAL_LOWER:
-        label = "negative"
-        index = -1
-    else:
-        label = "neutral"
-        index = 0
-
-    return {
-        "sentiment_score": score,
-        "sentiment_label": label,
-        "sentiment_index": index,
-    }
+        return {"sentiment_score": score, "sentiment_label": "positive", "sentiment_index": 1}
+    if score <= NEUTRAL_LOWER:
+        return {"sentiment_score": score, "sentiment_label": "negative", "sentiment_index": -1}
+    return {"sentiment_score": score, "sentiment_label": "neutral", "sentiment_index": 0}
 
 
 def compute_market_bias(sentiment_index: int) -> str:
@@ -150,133 +116,125 @@ def compute_market_bias(sentiment_index: int) -> str:
     return "neutral"
 
 
-def parse_date_utc(date_str: str) -> datetime:
-    dt = datetime.fromisoformat(date_str)
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(timezone.utc)
-
-
 def transform_record(date_str: str, text: str) -> Dict[str, Any]:
     created_at = parse_date_utc(date_str)
-    event_date = created_at.date().isoformat()
-
-    if not is_economic_post(text):
-        raise RuntimeError("Non-economic post passed to transform_record")
-
     sent = compute_sentiment(text)
-    market_bias = compute_market_bias(sent["sentiment_index"])
-    econ_cats = economic_categories(text)
-
-    event = {
+    return {
         "event_type": "TRUMP_TRUTH_ECON",
         "platform": "truthsocial",
         "user_handle": TRUMP_HANDLE.lstrip("@"),
         "truth_id": None,
         "truth_url": None,
         "created_at": created_at.isoformat(),
-        "event_date": event_date,
+        "event_date": created_at.date().isoformat(),
         "raw_text": text,
         "language": "en",
         "is_economic": True,
-        "economic_categories": econ_cats,
+        "economic_categories": economic_categories(text),
         "sentiment_score": sent["sentiment_score"],
         "sentiment_label": sent["sentiment_label"],
         "sentiment_index": sent["sentiment_index"],
-        "market_bias": market_bias,
+        "market_bias": compute_market_bias(sent["sentiment_index"]),
         "ingested_at": datetime.now(timezone.utc).isoformat(),
     }
 
-    return event
 
-
-def main():
-    init_env()
-    spark = init_spark()
-
-    if not LOCAL_JSONL_PATH.exists():
-        raise FileNotFoundError(f"Local jsonl file not found: {LOCAL_JSONL_PATH}")
-
-    print(f"[DEBUG] Using JSONL file: {LOCAL_JSONL_PATH}")
-
-    events: List[Dict[str, Any]] = []
-
-    total = 0
-    after_date = 0
-    has_tariff = 0
-    tariff_and_econ = 0
-    econ_total = 0
-
-    with LOCAL_JSONL_PATH.open("r", encoding="utf-8") as f:
+def iter_jsonl_records(path: Path) -> Iterable[Tuple[str, str]]:
+    with path.open("r", encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if not line:
                 continue
-
-            total += 1
-
             try:
                 obj = json.loads(line)
-            except json.JSONDecodeError as e:
-                print(f"[WARN] Failed to parse JSON line: {e}")
+            except json.JSONDecodeError:
                 continue
-
-            if total == 1:
-                print(f"[DEBUG] first obj keys = {list(obj.keys())[:10]}")
 
             date_str = obj.get("date")
             text = obj.get("text")
+            if date_str and text:
+                yield date_str, text
 
-            if not date_str or not text:
-                continue
 
-            t = text.lower()
-            if "tariff" in t or "tariffs" in t:
-                has_tariff += 1
+def build_events_and_stats(records: Iterable[Tuple[str, str]]) -> Tuple[List[Dict[str, Any]], Dict[str, int]]:
+    stats = {
+        "total": 0,
+        "after_date": 0,
+        "has_tariff": 0,
+        "econ_total": 0,
+        "tariff_and_econ": 0,
+    }
+    events: List[Dict[str, Any]] = []
 
+    for date_str, text in records:
+        stats["total"] += 1
+
+        t = text.lower()
+        has_tariff = ("tariff" in t) or ("tariffs" in t)
+        if has_tariff:
+            stats["has_tariff"] += 1
+
+        try:
+            created_at = parse_date_utc(date_str)
+        except Exception:
+            continue
+
+        if created_at < START_DATE:
+            continue
+
+        stats["after_date"] += 1
+
+        econ = is_economic_post(text)
+        if econ:
+            stats["econ_total"] += 1
+            if has_tariff:
+                stats["tariff_and_econ"] += 1
             try:
-                created_at = parse_date_utc(date_str)
-                if created_at < START_DATE:
-                    continue
-                after_date += 1
-
-                if is_economic_post(text):
-                    econ_total += 1
-                    if "tariff" in t or "tariffs" in t:
-                        tariff_and_econ += 1
-
-                if not is_economic_post(text):
-                    continue
-
-                event = transform_record(date_str, text)
-                events.append(event)
-            except Exception as e:
-                print(f"[WARN] Failed to transform record: {e}")
+                events.append(transform_record(date_str, text))
+            except Exception:
                 continue
 
-    print(
-        f"[DEBUG] total={total}, after_date={after_date}, "
-        f"has_tariff={has_tariff}, econ_total={econ_total}, "
-        f"tariff_and_econ={tariff_and_econ}"
-    )
+    return events, stats
+
+
+def build_output_path() -> str:
+    prefix = (DEFAULT_S3_PREFIX or "").strip("/")
+    base = f"s3a://{DEFAULT_S3_BUCKET}"
+    if prefix:
+        base += f"/{prefix}"
+    return base + "/events/source=truthsocial/user=realDonaldTrump"
+
+
+def write_events_to_s3(spark: SparkSession, events: List[Dict[str, Any]]) -> str:
+    df = spark.createDataFrame(events, schema=EVENT_SCHEMA)
+    output_path = build_output_path()
+
+    (df.write
+       .mode("append")
+       .partitionBy("event_date")
+       .format("json")
+       .save(output_path))
+
+    return output_path
+
+
+def main() -> None:
+    init_env()
+
+    if not LOCAL_JSONL_PATH.exists():
+        raise FileNotFoundError(f"Local jsonl file not found: {LOCAL_JSONL_PATH}")
+
+    spark = init_spark()
+
+    events, stats = build_events_and_stats(iter_jsonl_records(LOCAL_JSONL_PATH))
+    print(f"[DEBUG] {stats}")
 
     if not events:
         print("No economic posts found, nothing to write.")
         return
 
-    df = spark.createDataFrame(events, schema=EVENT_SCHEMA)
-
-
-    output_path = f"s3a://{S3_BUCKET}/{S3_PREFIX}"
-    (
-        df.write
-        .mode("append")
-        .partitionBy("event_date")
-        .format("json")
-        .save(output_path)
-    )
-
-    print(f"[Spark] Written {df.count()} events to {output_path} partitioned by event_date")
+    output_path = write_events_to_s3(spark, events)
+    print(f"[Spark] Written {len(events)} events to {output_path} partitioned by event_date")
 
 
 if __name__ == "__main__":
