@@ -357,7 +357,6 @@ def _flush_month_to_s3(
             sub_df.coalesce(1)
             .write.mode("overwrite")
             .option("header", "true")
-            .option("compression", "snappy")
             .csv(out_path)
         )
 

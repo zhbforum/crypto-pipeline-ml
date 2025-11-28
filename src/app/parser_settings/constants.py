@@ -1,7 +1,7 @@
 # --- Binance ---
 
 BINANCE_BASE_URL = "https://data.binance.vision"
-DEFAULT_BINANCE_INTERVAL = "3m"
+DEFAULT_BINANCE_INTERVAL = "1d"
 DEFAULT_BINANCE_SYMBOLS = [
     "BTCUSDT",
     "ETHUSDT",
