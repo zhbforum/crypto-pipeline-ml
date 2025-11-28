@@ -52,3 +52,25 @@ def interval_seconds(interval: str) -> int:
     if val is None:
         raise ValueError(f"Unsupported interval: {interval}")
     return val
+
+
+DAILY_AGG_PATH: Final[str] = os.getenv(
+    "DAILY_AGG_PATH",
+    "s3a://crypto-pipeline-ml/silver/kline_1m/",
+)
+
+DAILY_FORECAST_PATH: Final[str] = os.getenv(
+    "DAILY_FORECAST_PATH",
+    "s3a://crypto-pipeline-ml/gold/predictions_montly/",
+)
+
+SPARK_PACKAGES: Final[str] = (
+    "org.apache.hadoop:hadoop-aws:3.4.0,"
+    "com.amazonaws:aws-java-sdk-bundle:1.12.772"
+)
+AWS_DEFAULT_REGION: Final[str] = os.getenv("AWS_DEFAULT_REGION", "eu-north-1")
+AWS_ACCESS_KEY_ID: Final[str] = os.getenv("AWS_ACCESS_KEY_ID", "")
+AWS_SECRET_ACCESS_KEY: Final[str] = os.getenv("AWS_SECRET_ACCESS_KEY", "")
+
+FORECAST_START_DS: Final[str | None] = os.getenv("FORECAST_START_DS")  
+FORECAST_END_DS: Final[str | None] = os.getenv("FORECAST_END_DS")      

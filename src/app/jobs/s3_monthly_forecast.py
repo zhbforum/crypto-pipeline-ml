@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-import os
+from typing import Final
 from pathlib import Path
-from typing import Optional
 
 import pandas as pd
 from dotenv import load_dotenv
@@ -14,35 +13,37 @@ from app.lib.logger import get_logger
 
 
 def _load_project_env() -> None:
-    current = Path(__file__).resolve()
-    for parent in [current.parent] + list(current.parents):
-        env_path = parent / ".env"
-        if env_path.is_file():
-            load_dotenv(env_path)
-            break
+    root = Path.cwd()
+    env_path = root / ".env"
+    if env_path.is_file():
+        load_dotenv(env_path)
+    else:
+        print(f"[WARN] .env not found in {root}, AWS creds may be empty")
 
 
 _load_project_env()
+
+from app.constants import (  
+    DAILY_AGG_PATH,
+    DAILY_FORECAST_PATH,
+    SPARK_PACKAGES,
+    AWS_DEFAULT_REGION,
+    AWS_ACCESS_KEY_ID,
+    AWS_SECRET_ACCESS_KEY,
+    FORECAST_START_DS,
+    FORECAST_END_DS,
+)
+
 logger = get_logger(__name__)
 
 
-def _get_env_str(name: str, default: str = "") -> str:
-    value = os.getenv(name)
-    return value if value is not None else default
-
-
-DAILY_AGG_PATH = os.getenv(
-    "DAILY_AGG_PATH",
-    "s3a://crypto-pipeline-ml/silver/kline_1m/",
-)
-
-DAILY_FORECAST_PATH = os.getenv(
-    "DAILY_FORECAST_PATH",
-    "s3a://crypto-pipeline-ml/gold/predictions_montly/",
-)
-
-
 def build_spark(app_name: str = "s3-daily-forecast") -> SparkSession:
+    if not AWS_ACCESS_KEY_ID or not AWS_SECRET_ACCESS_KEY:
+        raise RuntimeError(
+            "AWS credentials are empty. "
+            "Check .env in project root (AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY)."
+        )
+
     conf = (
         SparkConf()
         .setAppName(app_name)
@@ -50,26 +51,18 @@ def build_spark(app_name: str = "s3-daily-forecast") -> SparkSession:
         .set("spark.sql.sources.partitionOverwriteMode", "dynamic")
     )
 
-    pkgs = os.getenv("SPARK_PACKAGES")
-    if pkgs:
-        conf = conf.set("spark.jars.packages", pkgs)
+    if SPARK_PACKAGES:
+        conf = conf.set("spark.jars.packages", SPARK_PACKAGES)
 
-    region = _get_env_str("AWS_DEFAULT_REGION", "eu-north-1")
     conf = (
         conf.set("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem")
         .set(
             "spark.hadoop.fs.s3a.aws.credentials.provider",
             "org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider",
         )
-        .set(
-            "spark.hadoop.fs.s3a.access.key",
-            _get_env_str("AWS_ACCESS_KEY_ID", ""),
-        )
-        .set(
-            "spark.hadoop.fs.s3a.secret.key",
-            _get_env_str("AWS_SECRET_ACCESS_KEY", ""),
-        )
-        .set("spark.hadoop.fs.s3a.endpoint", f"s3.{region}.amazonaws.com")
+        .set("spark.hadoop.fs.s3a.access.key", AWS_ACCESS_KEY_ID)
+        .set("spark.hadoop.fs.s3a.secret.key", AWS_SECRET_ACCESS_KEY)
+        .set("spark.hadoop.fs.s3a.endpoint", f"s3.{AWS_DEFAULT_REGION}.amazonaws.com")
     )
 
     spark = SparkSession.builder.config(conf=conf).getOrCreate()
@@ -77,7 +70,7 @@ def build_spark(app_name: str = "s3-daily-forecast") -> SparkSession:
     return spark
 
 
-FORECAST_SCHEMA = T.StructType(
+FORECAST_SCHEMA: Final = T.StructType(
     [
         T.StructField("symbol", T.StringType(), nullable=False),
         T.StructField("ds", T.DateType(), nullable=False),
@@ -86,10 +79,11 @@ FORECAST_SCHEMA = T.StructType(
 )
 
 
-def _fit_arima_and_forecast_next(y: pd.Series) -> Optional[float]:
+def _fit_arima_and_forecast_next(y: pd.Series) -> float | None:
     y_clean = y.astype(float).dropna()
     if len(y_clean) < 10:
         return None
+
     try:
         model = auto_arima(
             y_clean.to_numpy(),
@@ -99,7 +93,7 @@ def _fit_arima_and_forecast_next(y: pd.Series) -> Optional[float]:
             error_action="ignore",
         )
         return float(model.predict(n_periods=1)[0])
-    except Exception as exc:
+    except Exception as exc:  
         logger.exception("ARIMA fit/predict failed: %s", exc)
         return None
 
@@ -124,6 +118,52 @@ def forecast_next_day(pdf: pd.DataFrame) -> pd.DataFrame:
             "y_hat_close": [y_hat],
         }
     )
+
+
+def forecast_for_period(pdf: pd.DataFrame) -> pd.DataFrame:
+    if pdf.empty:
+        return pd.DataFrame(columns=["symbol", "ds", "y_hat_close"])
+
+    pdf = pdf.sort_values("ds").copy()
+    symbol = str(pdf["symbol"].iloc[0])
+
+    if not FORECAST_START_DS or not FORECAST_END_DS:
+        return forecast_next_day(pdf)
+
+    try:
+        start_date = pd.to_datetime(FORECAST_START_DS).date()
+        end_date = pd.to_datetime(FORECAST_END_DS).date()
+    except Exception as exc:  
+        logger.exception("Invalid FORECAST_*_DS values: %s", exc)
+        return pd.DataFrame(columns=["symbol", "ds", "y_hat_close"])
+
+    pdf["ds"] = pd.to_datetime(pdf["ds"]).dt.date
+
+    rows: list[dict[str, object]] = []
+
+    for target_ts in pd.date_range(start_date, end_date):
+        target_ds = target_ts.date()
+        history = pdf[pdf["ds"] < target_ds]
+
+        if history.empty:
+            continue
+
+        y_hat = _fit_arima_and_forecast_next(history["close"])
+        if y_hat is None:
+            continue
+
+        rows.append(
+            {
+                "symbol": symbol,
+                "ds": target_ds,
+                "y_hat_close": y_hat,
+            }
+        )
+
+    if not rows:
+        return pd.DataFrame(columns=["symbol", "ds", "y_hat_close"])
+
+    return pd.DataFrame(rows)
 
 
 def run() -> None:
@@ -158,16 +198,61 @@ def run() -> None:
 
     forecast_df = (
         daily_df.groupBy("symbol")
-        .applyInPandas(forecast_next_day, schema=FORECAST_SCHEMA)
+        .applyInPandas(forecast_for_period, schema=FORECAST_SCHEMA)
         .withColumn("created_at", F.current_timestamp())
     )
 
+    if FORECAST_START_DS and FORECAST_END_DS:
+        logger.info(
+            "Joining forecasts with actual close for period %s to %s",
+            FORECAST_START_DS,
+            FORECAST_END_DS,
+        )
+
+        actuals_df = (
+            daily_df.filter(
+                (F.col("ds") >= F.lit(FORECAST_START_DS).cast("date"))
+                & (F.col("ds") <= F.lit(FORECAST_END_DS).cast("date"))
+            )
+            .select("symbol", "ds", "close")
+            .withColumnRenamed("close", "actual_close")
+        )
+
+        forecast_df = (
+            forecast_df.alias("f")
+            .join(actuals_df.alias("a"), ["symbol", "ds"], "left")
+            .withColumn(
+                "abs_error",
+                F.when(
+                    F.col("a.actual_close").isNull(),
+                    F.lit(None).cast("double"),
+                ).otherwise(
+                    F.abs(F.col("f.y_hat_close") - F.col("a.actual_close"))
+                ),
+            )
+            .withColumn(
+                "ape",
+                F.when(
+                    F.col("a.actual_close").isNull(),
+                    F.lit(None).cast("double"),
+                ).otherwise(
+                    F.abs(
+                        (F.col("f.y_hat_close") - F.col("a.actual_close"))
+                        / F.col("a.actual_close")
+                    )
+                ),
+            )
+        )
+
     logger.info("Writing forecasts to %s", DAILY_FORECAST_PATH)
+
     (
         forecast_df.repartition("ds", "symbol")
         .write.mode("append")
+        .option("header", True)
+        .option("compression", "none")
         .partitionBy("ds", "symbol")
-        .parquet(DAILY_FORECAST_PATH)
+        .csv(DAILY_FORECAST_PATH)
     )
 
     logger.info("Forecast job finished successfully.")
