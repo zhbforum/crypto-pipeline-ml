@@ -150,3 +150,8 @@
 ```bash
 # приклад запуску (з кореня проєкту)
 streamlit run src/app/analytics/ui/analytics_app.py
+```
+---
+## Веб-версія додатку
+
+Преглянути можна за посиланням: [crypto-pipeline-statistics](https://crypto-pipeline-ml-urvfowtna89ncet3hxry5n.streamlit.app/)
