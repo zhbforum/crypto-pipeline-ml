@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 import statsmodels.api as sm
 
-from app.analytics.datasets import load_btc_daily_returns
+from app.analytics.setdata import load_btc_daily_returns
 
 
 def fit_ar1_regression(series: pd.Series) -> Tuple[Any, pd.DataFrame, pd.Series]:
