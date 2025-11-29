@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 from pmdarima import auto_arima
 
-from app.analytics.datasets import load_btc_daily_returns
+from app.analytics.setdata import load_btc_daily_returns
 
 
 def fit_arima_model(

@@ -15,7 +15,7 @@ for parent in ROOT.parents:
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from app.analytics.datasets import load_btc_daily_close, load_btc_daily_returns
+from app.analytics.setdata import load_btc_daily_close, load_btc_daily_returns
 from app.analytics.descriptive_stats import compute_descriptive_stats
 from app.analytics.distributions import fit_normal, fit_student_t
 from app.analytics.linear_regression import fit_ar1_regression

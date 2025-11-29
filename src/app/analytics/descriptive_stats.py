@@ -7,7 +7,7 @@ from typing import Optional, cast
 
 import pandas as pd
 
-from app.analytics.datasets import load_btc_daily_returns
+from app.analytics.setdata import load_btc_daily_returns
 
 
 @dataclass
