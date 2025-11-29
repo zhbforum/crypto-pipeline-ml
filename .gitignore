@@ -208,5 +208,7 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 
+models*
 
-data*
+data/manual_macro_events.jsonl
+data/trump_truthsocial_since_2025-01-20.jsonl
