@@ -6,6 +6,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 import streamlit as st
+import pandas as pd
 
 ROOT = Path(__file__).resolve()
 for parent in ROOT.parents:
@@ -276,8 +277,6 @@ elif page == "Прогноз ARIMA":
     )
 
     model, clean = fit_arima_model(returns, seasonal=False)
-
-    import pandas as pd
 
     order = model.order
     arima_res = model.arima_res_

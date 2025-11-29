@@ -5,4 +5,8 @@ python-dotenv>=1.0
 pytz
 pmdarima>=2.0.0
 requests>=2.31,<3
-vaderSentiment>=3.3.2
+streamlit
+matplotlib
+numpy
+pandas
+statsmodels
