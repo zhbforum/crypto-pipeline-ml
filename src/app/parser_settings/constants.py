@@ -67,3 +67,6 @@ SPARK_WRITE_FORMAT = "json"
 SPARK_WRITE_MODE = "append"
 S3_EVENTS_PATH = "events/source=truthsocial/user=realDonaldTrump"
 BATCH_WRITE_SIZE = 2000
+
+NEUTRAL_LOWER = -0.3
+NEUTRAL_UPPER = 0.3

@@ -45,6 +45,8 @@ from app.parser_settings.constants import (
     TRUTH_PLATFORM,
     TRUTH_USER_HANDLE,
     TRUTH_JSONL_REL_PATH,
+    NEUTRAL_LOWER,
+    NEUTRAL_UPPER,
 )
 
 logger = logging.getLogger(__name__)
@@ -109,6 +111,14 @@ def load_config() -> AppConfig:
     )
 
 
+def score_to_label(score: float, low: float = NEUTRAL_LOWER, up: float = NEUTRAL_UPPER) -> Tuple[str, int]:
+    if score <= low:
+        return "negative", -1
+    if score >= up:
+        return "positive", 1
+    return "neutral", 0
+
+
 class FinBertSentiment:
     def __init__(self, model_dir: Path) -> None:
         if not model_dir.exists():
@@ -131,22 +141,37 @@ class FinBertSentiment:
             padding=True,
             return_tensors="pt",
         )
+
         input_ids = enc["input_ids"]
         attention_mask = enc["attention_mask"]
+
         probs_all: List[torch.Tensor] = []
         for i in range(0, input_ids.size(0), FINBERT_BATCH_SIZE):
             ids = input_ids[i : i + FINBERT_BATCH_SIZE].to(self.device)
             mask = attention_mask[i : i + FINBERT_BATCH_SIZE].to(self.device)
             logits = self.model(input_ids=ids, attention_mask=mask).logits
             probs_all.append(torch.softmax(logits, dim=-1).cpu())
+
         probs_mean = torch.cat(probs_all, dim=0).mean(dim=0)
+
         probs_dict: Dict[str, float] = {
-            self.id2label.get(idx, str(idx)): float(p) for idx, p in enumerate(probs_mean.tolist())
+            self.id2label.get(idx, str(idx)): float(p)
+            for idx, p in enumerate(probs_mean.tolist())
         }
-        label = max(probs_dict.items(), key=lambda kv: kv[1])[0]
-        sidx = 1 if label == "positive" else -1 if label == "negative" else 0
-        score = float(probs_dict.get("positive", 0.0) - probs_dict.get("negative", 0.0))
-        return {"sentiment_score": score, "sentiment_label": label, "sentiment_index": sidx}
+
+        pos = float(probs_dict.get("positive", 0.0))
+        neg = float(probs_dict.get("negative", 0.0))
+
+        denom = pos + neg
+        score = float((pos - neg) / denom) if denom > 0.0 else 0.0
+
+        label, sidx = score_to_label(score)
+
+        return {
+            "sentiment_score": score,
+            "sentiment_label": label,
+            "sentiment_index": sidx,
+        }
 
 
 def parse_date_utc(date_str: str) -> datetime:
