@@ -17,42 +17,47 @@ if str(ROOT) not in sys.path:
 
 from app.analytics.setdata import load_btc_daily_close, load_btc_daily_returns
 from app.analytics.descriptive_stats import compute_descriptive_stats
-from app.analytics.distributions import fit_normal, fit_student_t
+from app.analytics.distributions import (
+    fit_normal,
+    fit_student_t,
+    kolmogorov_smirnov_tests,
+    chi_square_normal,
+)
 from app.analytics.linear_regression import fit_ar1_regression
 from app.analytics.arima_model import fit_arima_model, forecast_arima
 from app.analytics.monte_carlo import analyze_scenario
 
 
-st.set_page_config(page_title="BTC Analytics", layout="wide")
-st.title("BTC/USDT Statistical Analysis Dashboard")
+st.set_page_config(page_title="Панель аналізу BTC", layout="wide")
+st.title("Панель статистичного аналізу BTC/USDT")
 
 page = st.sidebar.radio(
-    "Section",
+    "Розділ",
     (
-        "Descriptive stats",
-        "Distribution & tails",
-        "AR(1) regression",
-        "ARIMA forecast",
-        "Monte Carlo",
+        "Описова статистика",
+        "Розподіл і хвости",
+        "AR(1)-регресія",
+        "Прогноз ARIMA",
+        "Моделювання Монте-Карло",
     ),
 )
 
 horizon_mc = st.sidebar.slider(
-    "Monte Carlo horizon (days)",
+    "Горизонт Монте-Карло (днів)",
     min_value=7,
     max_value=90,
     value=30,
     step=1,
 )
 n_paths_mc = st.sidebar.slider(
-    "Monte Carlo paths",
+    "Кількість траєкторій Монте-Карло",
     min_value=2000,
     max_value=50000,
     value=10000,
     step=2000,
 )
 vol_reduction_mc = st.sidebar.slider(
-    "MC volatility reduction",
+    "Зменшення волатильності для сценарію (%)",
     min_value=0.0,
     max_value=0.5,
     value=0.2,
@@ -70,53 +75,76 @@ def load_data():
 close, returns = load_data()
 
 
-if page == "Descriptive stats":
-    st.header("Descriptive statistics of daily log-returns")
+if page == "Описова статистика":
+    st.header("Описова статистика денних логарифмічних дохідностей")
 
     stats = compute_descriptive_stats(returns)
 
     col1, col2 = st.columns(2)
 
     with col1:
-        st.markdown("### Basic moments")
-        st.write(f"Number of observations: **{stats.n}**")
-        st.write(f"Mean: **{stats.mean:.8f}**")
-        st.write(f"Variance: **{stats.variance:.8f}**")
-        st.write(f"Std dev: **{stats.std:.8f}**")
+        st.markdown("### Основні моменти")
+        st.write(f"Кількість спостережень (n): **{stats.n}**")
+        st.write(f"Середнє значення (μ): **{stats.mean:.8f}**")
+        st.write(f"Дисперсія (σ²): **{stats.variance:.8f}**")
+        st.write(f"Середньоквадратичне відхилення (σ): **{stats.std:.8f}**")
 
     with col2:
-        st.markdown("### Shape")
-        st.write(f"Skewness: **{stats.skewness:.4f}**")
-        st.write(f"Kurtosis: **{stats.kurtosis:.4f}**")
+        st.markdown("### Форма розподілу")
+        st.write(f"Асиметрія (γ₁): **{stats.skewness:.4f}**")
+        st.write(f"Ексцес (γ₂): **{stats.kurtosis:.4f}**")
         st.write(
-            f"95% CI for mean: **[{stats.ci_lower:.8f}; {stats.ci_upper:.8f}]**"
+            f"95% довірчий інтервал для середнього (μ): "
+            f"**[{stats.ci_lower:.8f}; {stats.ci_upper:.8f}]**"
         )
 
     st.markdown("---")
-    st.markdown("### Histogram of daily log-returns")
+    st.markdown("### Гістограма денних логарифмічних дохідностей")
 
     fig, ax = plt.subplots(figsize=(10, 4))
     ax.hist(returns, bins=80, alpha=0.7)
-    ax.set_xlabel("Daily log-return")
-    ax.set_ylabel("Frequency")
+    ax.set_xlabel("Денна логарифмічна дохідність")
+    ax.set_ylabel("Частота")
     st.pyplot(fig)
 
 
-elif page == "Distribution & tails":
-    st.header("Distribution fitting and tail probabilities")
+elif page == "Розподіл і хвости":
+    st.header("Підбір розподілу та ймовірність хвостів")
 
     mu, sigma = fit_normal(returns)
     df_t, loc_t, scale_t = fit_student_t(returns)
 
     col1, col2 = st.columns(2)
     with col1:
-        st.markdown("### Normal fit")
-        st.write(f"mu = **{mu:.6f}**, sigma = **{sigma:.6f}**")
+        st.markdown("### Нормальний розподіл")
+        st.write(f"μ = **{mu:.6f}**, σ = **{sigma:.6f}**")
     with col2:
-        st.markdown("### Student t fit")
+        st.markdown("### t-розподіл Стьюдента")
         st.write(
             f"df = **{df_t:.2f}**, loc = **{loc_t:.6f}**, scale = **{scale_t:.6f}**"
         )
+
+    ks_results = kolmogorov_smirnov_tests(returns)
+    ks_norm_D, ks_norm_p = ks_results["normal"]
+    ks_t_D, ks_t_p = ks_results["student_t"]
+
+    chi2_stat, chi2_p, counts_chi, exp_counts_chi, bin_edges_chi = chi_square_normal(
+        returns, bins=40
+    )
+
+    st.markdown("---")
+    st.markdown("### Перевірка узгодженості (goodness-of-fit)")
+
+    col_ks, col_chi = st.columns(2)
+
+    with col_ks:
+        st.markdown("#### Критерій Колмогорова–Смирнова")
+        st.write(f"Нормальний: D = **{ks_norm_D:.4f}**, p-value = **{ks_norm_p:.4g}**")
+        st.write(f"t-розподіл: D = **{ks_t_D:.4f}**, p-value = **{ks_t_p:.4g}**")
+
+    with col_chi:
+        st.markdown("#### Критерій χ² Пірсона (проти Normal)")
+        st.write(f"χ² = **{chi2_stat:.2f}**, p-value = **{chi2_p:.4g}**")
 
     clean = returns.dropna().to_numpy()
     fig, ax = plt.subplots(figsize=(10, 4))
@@ -125,7 +153,7 @@ elif page == "Distribution & tails":
         bins=80,
         density=True,
         alpha=0.5,
-        label="Empirical returns",
+        label="Емпіричні дохідності",
     )
     x_min = float(bin_edges[0])
     x_max = float(bin_edges[-1])
@@ -136,20 +164,55 @@ elif page == "Distribution & tails":
     pdf_norm = sp_stats.norm.pdf(x, loc=mu, scale=sigma)
     pdf_t = sp_stats.t.pdf((x - loc_t) / scale_t, df_t) / scale_t
 
-    ax.plot(x, pdf_norm, linewidth=2, label="Normal")
-    ax.plot(x, pdf_t, linewidth=2, linestyle="--", label="Student t")
-    ax.set_xlabel("Daily log-return")
-    ax.set_ylabel("Density")
+    ax.plot(x, pdf_norm, linewidth=2, label="Нормальний розподіл")
+    ax.plot(
+        x,
+        pdf_t,
+        linewidth=2,
+        linestyle="--",
+        label="t-розподіл Стьюдента",
+    )
+    ax.set_xlabel("Денна логарифмічна дохідність")
+    ax.set_ylabel("Щільність")
     ax.legend()
-    st.markdown("### Histogram with fitted Normal and Student t")
+    st.markdown("---")
+    st.markdown("### Гістограма з підігнаними Normal та t-розподілом")
     st.pyplot(fig)
 
+    centers_chi = 0.5 * (bin_edges_chi[1:] + bin_edges_chi[:-1])
+    widths_chi = np.diff(bin_edges_chi)
+
+    fig_chi, ax_chi = plt.subplots(figsize=(10, 4))
+    ax_chi.bar(
+        centers_chi,
+        counts_chi,
+        width=widths_chi,
+        alpha=0.6,
+        align="center",
+        label="Спостережені частоти",
+    )
+    ax_chi.bar(
+        centers_chi,
+        exp_counts_chi,
+        width=widths_chi,
+        alpha=0.4,
+        align="center",
+        label="Очікувані частоти (Normal)",
+    )
+    ax_chi.set_xlabel("Біни денних логарифмічних дохідностей")
+    ax_chi.set_ylabel("Кількість")
+    ax_chi.set_title("Критерій χ²: спостережені vs очікувані частоти (Normal)")
+    ax_chi.legend()
+
+    st.markdown("### Chi-square: спостережені та очікувані частоти")
+    st.pyplot(fig_chi)
+
     st.markdown("---")
-    st.markdown("### QQ-plots")
+    st.markdown("### QQ-графіки")
 
     fig2, ax2 = plt.subplots(figsize=(5, 5))
-    sp_stats.probplot(clean, dist="norm", plot=ax2)
-    ax2.set_title("QQ vs Normal")
+    sp_stats.probplot(clean, dist="norm", sparams=(mu, sigma), plot=ax2)
+    ax2.set_title("QQ-графік відносно Normal")
 
     sorted_data = np.sort(clean)
     n = sorted_data.size
@@ -161,7 +224,7 @@ elif page == "Distribution & tails":
     min_val = min(np.min(quantiles_t), np.min(sorted_data))
     max_val = max(np.max(quantiles_t), np.max(sorted_data))
     ax3.plot([min_val, max_val], [min_val, max_val], linewidth=1)
-    ax3.set_title("QQ vs Student t")
+    ax3.set_title("QQ-графік відносно t-розподілу")
 
     col_qq1, col_qq2 = st.columns(2)
     with col_qq1:
@@ -170,13 +233,13 @@ elif page == "Distribution & tails":
         st.pyplot(fig3)
 
 
-elif page == "AR(1) regression":
-    st.header("AR(1) regression for daily log-returns")
+elif page == "AR(1)-регресія":
+    st.header("AR(1)-регресія для денних логарифмічних дохідностей")
 
     model, x, y = fit_ar1_regression(returns)
     y_pred = model.predict(x)
 
-    st.markdown("### Key coefficients")
+    st.markdown("### Ключові коефіцієнти моделі")
     params = model.params
     pvalues = model.pvalues
 
@@ -191,38 +254,68 @@ elif page == "AR(1) regression":
     st.write(f"R² = **{model.rsquared:.4f}**")
 
     fig, ax = plt.subplots(figsize=(10, 4))
-    ax.plot(y.index, y.to_numpy(), label="Actual", linewidth=1)
-    ax.plot(y.index, y_pred, label="Fitted", linewidth=1)
-    ax.set_xlabel("Date")
-    ax.set_ylabel("Log-return")
-    ax.set_title("AR(1) fit")
+    ax.plot(y.index, y.to_numpy(), label="Фактичні значення", linewidth=1)
+    ax.plot(y.index, y_pred, label="Оцінені значення (fitted)", linewidth=1)
+    ax.set_xlabel("Дата")
+    ax.set_ylabel("Логарифмічна дохідність")
+    ax.set_title("AR(1)-регресія")
     ax.legend()
-    st.markdown("### Actual vs fitted returns")
+    st.markdown("### Фактичні vs оцінені дохідності")
     st.pyplot(fig)
 
 
-elif page == "ARIMA forecast":
-    st.header("ARIMA forecast for daily log-returns")
+elif page == "Прогноз ARIMA":
+    st.header("Прогноз ARIMA для денних логарифмічних дохідностей")
 
     forecast_horizon = st.slider(
-        "Forecast horizon (days)",
-        min_value=7,
-        max_value=60,
-        value=14,
+        "Горизонт прогнозу (днів)",
+        min_value=1,
+        max_value=14,
+        value=7,
         step=1,
     )
 
     model, clean = fit_arima_model(returns, seasonal=False)
+
+    import pandas as pd
+
+    order = model.order
+    arima_res = model.arima_res_
+
+    param_names = list(arima_res.param_names)
+    param_values = arima_res.params
+    param_pvalues = arima_res.pvalues
+
+    params_df = pd.DataFrame(
+        {
+            "Параметр": param_names,
+            "Оцінка коефіцієнта": param_values,
+            "p-value": param_pvalues,
+        }
+    )
+
+    st.markdown("### Підібрана модель ARIMA")
+    st.write(
+        f"Порядок ARIMA (p, d, q): **({order[0]}, {order[1]}, {order[2]})**"
+    )
+
+    st.markdown("### Оцінені коефіцієнти (ваги) моделі")
+    st.dataframe(
+        params_df.style.format(
+            {
+                "Оцінка коефіцієнта": "{:.6f}",
+                "p-value": "{:.4f}",
+            }
+        )
+    )
+
     fc_values, fc_ci = forecast_arima(model, periods=forecast_horizon)
 
-    history_x = clean.index.to_numpy()
-    history_y = clean.to_numpy(dtype=float)
+    history = clean.tail(250)
+    history_x = history.index.to_numpy()
+    history_y_pct = history.to_numpy(dtype=float) * 100.0
 
     last_index = clean.index[-1]
-    future_index = (
-        Path  # dummy to keep type checkers happy, replaced below
-    )
-    import pandas as pd
 
     future_index = pd.date_range(
         last_index,
@@ -231,46 +324,82 @@ elif page == "ARIMA forecast":
     )[1:]
     future_x = future_index.to_numpy()
 
+    fc_mean_pct = fc_values * 100.0
+    fc_ci_pct = fc_ci * 100.0
+
     fig, ax = plt.subplots(figsize=(10, 4))
-    ax.plot(history_x, history_y, label="History", linewidth=1)
-    ax.plot(future_x, fc_values, label="Forecast", linewidth=2)
+
+    ax.plot(history_x, history_y_pct, label="Історія (останні 250 днів)", linewidth=1)
+    ax.plot(future_x, fc_mean_pct, label="Прогноз середньої дохідності", linewidth=2)
 
     ax.fill_between(
         future_x,
-        fc_ci[:, 0],
-        fc_ci[:, 1],
+        fc_ci_pct[:, 0],
+        fc_ci_pct[:, 1],
         alpha=0.3,
-        label="95% CI",
+        label="95% довірчий інтервал",
     )
 
-    ax.set_xlabel("Date")
-    ax.set_ylabel("Log-return")
-    ax.set_title("ARIMA forecast")
+    ax.axvline(last_index, color="grey", linestyle="--", linewidth=1)
+    ax.text(
+        last_index,
+        ax.get_ylim()[1],
+        " Початок прогнозу",
+        rotation=90,
+        va="top",
+        ha="left",
+        fontsize=8,
+    )
+
+    ax.set_xlabel("Дата")
+    ax.set_ylabel("Денна логарифмічна дохідність, %")
+    ax.set_title("Прогноз ARIMA для денних дохідностей (у відсотках)")
     ax.legend()
 
-    st.markdown("### ARIMA forecast with 95% confidence interval")
+    st.markdown("### Прогноз ARIMA з 95% довірчим інтервалом (у відсотках)")
     st.pyplot(fig)
 
+    df_forecast = pd.DataFrame(
+        {
+            "Дата": future_index,
+            "Прогноз, %": fc_mean_pct,
+            "Нижня межа 95% CI, %": fc_ci_pct[:, 0],
+            "Верхня межа 95% CI, %": fc_ci_pct[:, 1],
+        }
+    )
 
-elif page == "Monte Carlo":
-    st.header("Monte Carlo simulation for BTC 30-day returns")
+    st.markdown("### Таблиця прогнозованих денних дохідностей (%)")
+    st.dataframe(
+        df_forecast.set_index("Дата").style.format(
+            {
+                "Прогноз, %": "{:.4f}",
+                "Нижня межа 95% CI, %": "{:.4f}",
+                "Верхня межа 95% CI, %": "{:.4f}",
+            }
+        )
+    )
+
+
+elif page == "Моделювання Монте-Карло":
+    st.header("Моделювання Монте-Карло для k-денних дохідностей BTC")
 
     s0 = float(close.dropna().iloc[-1])
 
+    df_t, loc_t, scale_t = fit_student_t(returns)
+
     baseline = analyze_scenario(
-        scenario_name="Baseline (current volatility)",
+        scenario_name="Базовий сценарій (поточна волатильність)",
         s0=s0,
-        df=fit_student_t(returns)[0],
-        loc=fit_student_t(returns)[1],
-        scale=fit_student_t(returns)[2],
+        df=df_t,
+        loc=loc_t,
+        scale=scale_t,
         horizon_days=horizon_mc,
         n_paths=n_paths_mc,
     )
 
-    df_t, loc_t, scale_t = fit_student_t(returns)
     scale_improved = scale_t * (1.0 - vol_reduction_mc)
     improved = analyze_scenario(
-        scenario_name=f"Reduced volatility ({int(vol_reduction_mc * 100)}%)",
+        scenario_name=f"Знижена волатильність ({int(vol_reduction_mc * 100)}%)",
         s0=s0,
         df=df_t,
         loc=loc_t,
@@ -281,14 +410,16 @@ elif page == "Monte Carlo":
 
     col1, col2 = st.columns(2)
     with col1:
-        st.markdown("### Baseline scenario")
+        st.markdown("### Базовий сценарій")
         st.write(f"S₀ = {s0:,.2f} USDT")
         st.write(
             f"P(R{horizon_mc} < -30%) = {baseline.prob_drawdown_30:.4%}"
         )
         st.write(f"VaR95 = {baseline.var_95:.2%}")
     with col2:
-        st.markdown(f"### Reduced volatility ({int(vol_reduction_mc * 100)}%)")
+        st.markdown(
+            f"### Сценарій зі зниженою волатильністю ({int(vol_reduction_mc * 100)}%)"
+        )
         st.write(
             f"P(R{horizon_mc} < -30%) = {improved.prob_drawdown_30:.4%}"
         )
@@ -309,21 +440,21 @@ elif page == "Monte Carlo":
         bins=80,
         alpha=0.5,
         density=True,
-        label="Baseline",
+        label="Базовий сценарій",
     )
     ax.hist(
         r_impr_clipped,
         bins=80,
         alpha=0.5,
         density=True,
-        label="Reduced volatility",
+        label="Знижена волатильність",
     )
-    ax.set_xlabel(f"{horizon_mc}-day return")
-    ax.set_ylabel("Density")
+    ax.set_xlabel(f"{horizon_mc}-денна дохідність")
+    ax.set_ylabel("Щільність")
     ax.set_title(
-        f"Distribution of {horizon_mc}-day returns (central 99%)"
+        f"Розподіл {horizon_mc}-денних сукупних дохідностей (центральні 99%)"
     )
     ax.legend()
 
-    st.markdown("### Simulated distribution of cumulative returns")
+    st.markdown("### Імітований розподіл сукупних дохідностей")
     st.pyplot(fig)
