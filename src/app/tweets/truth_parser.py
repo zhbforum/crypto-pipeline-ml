@@ -13,7 +13,6 @@ import torch
 from dotenv import load_dotenv
 from pyspark.sql import SparkSession
 from pyspark.sql.types import (
-    ArrayType,
     BooleanType,
     DoubleType,
     IntegerType,
@@ -38,7 +37,6 @@ from app.parser_settings.constants import (
     LOW_INFO_MIN_WORDS,
     S3_EVENTS_PATH,
     SPARK_APP_NAME,
-    SPARK_WRITE_FORMAT,
     SPARK_WRITE_MODE,
     START_DATE_UTC,
     TRUTH_EVENT_TYPE,
@@ -47,6 +45,7 @@ from app.parser_settings.constants import (
     TRUTH_JSONL_REL_PATH,
     NEUTRAL_LOWER,
     NEUTRAL_UPPER,
+    DEFAULT_BINANCE_INTERVAL,
 )
 
 logger = logging.getLogger(__name__)
@@ -74,7 +73,7 @@ EVENT_SCHEMA = StructType(
         StructField("raw_text", StringType(), False),
         StructField("language", StringType(), False),
         StructField("is_economic", BooleanType(), False),
-        StructField("economic_categories", ArrayType(StringType()), False),
+        StructField("economic_categories", StringType(), False),
         StructField("sentiment_score", DoubleType(), False),
         StructField("sentiment_label", StringType(), False),
         StructField("sentiment_index", IntegerType(), False),
@@ -243,7 +242,7 @@ def build_output_path(bucket: str, prefix: str) -> str:
     p = (prefix or "").strip("/")
     base = f"s3a://{bucket}"
     if p:
-        base += f"/{p}"
+        base += f"/{p}/kline={DEFAULT_BINANCE_INTERVAL}"
     return base + f"/{S3_EVENTS_PATH}"
 
 
@@ -278,6 +277,9 @@ def init_spark(aws_region: str) -> SparkSession:
 
 def transform_record(created_at: datetime, text: str, finbert: FinBertSentiment) -> Dict[str, Any]:
     sent = finbert.predict(text)
+    cats_list = economic_categories(text)
+    cats_str = ",".join(cats_list)
+
     return {
         "event_type": TRUTH_EVENT_TYPE,
         "platform": TRUTH_PLATFORM,
@@ -289,7 +291,7 @@ def transform_record(created_at: datetime, text: str, finbert: FinBertSentiment)
         "raw_text": text,
         "language": "en",
         "is_economic": True,
-        "economic_categories": economic_categories(text),
+        "economic_categories": cats_str,
         "sentiment_score": sent["sentiment_score"],
         "sentiment_label": sent["sentiment_label"],
         "sentiment_index": sent["sentiment_index"],
@@ -343,7 +345,9 @@ def write_events_to_s3_in_batches(
         (
             df.write.mode(SPARK_WRITE_MODE)
             .partitionBy("event_date")
-            .format(SPARK_WRITE_FORMAT)
+            .option("header", "true")
+            .option("quoteAll", "true")
+            .format("csv")
             .save(output_path)
         )
         n = len(buf)

@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 
 BINANCE_BASE_URL = "https://data.binance.vision"
-DEFAULT_BINANCE_INTERVAL = "1d"
+DEFAULT_BINANCE_INTERVAL = "4h"
 DEFAULT_BINANCE_SYMBOLS = [
     "BTCUSDT",
     "ETHUSDT",
@@ -18,7 +18,7 @@ DEFAULT_BINANCE_END_DATE = ""
 
 DEFAULT_AWS_REGION = "eu-north-1"
 DEFAULT_S3_BUCKET = "crypto-pipeline-ml"
-DEFAULT_S3_PREFIX = "raw"
+DEFAULT_S3_PREFIX = "silver"
 
 # --- Spark / App ---
 
@@ -65,7 +65,7 @@ FINBERT_BATCH_SIZE = 16
 SPARK_APP_NAME = "trump_truths_finbert_sentiment"
 SPARK_WRITE_FORMAT = "json"
 SPARK_WRITE_MODE = "append"
-S3_EVENTS_PATH = "events/source=truthsocial/user=realDonaldTrump"
+S3_EVENTS_PATH = "event/source=truthsocial/user=realDonaldTrump"
 BATCH_WRITE_SIZE = 2000
 
 NEUTRAL_LOWER = -0.3

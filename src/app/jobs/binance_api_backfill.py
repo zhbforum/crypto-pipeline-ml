@@ -350,7 +350,7 @@ def _flush_month_to_s3(
             .orderBy("ts")
         )
 
-        out_path = f"{raw_base}/symbol={sym}/month={year_month}"
+        out_path = f"{raw_base}/kline={DEFAULT_BINANCE_INTERVAL}/symbol={sym}/month={year_month}"
         print(f"[info] writing {sym} {year_month} to {out_path}")
 
         (
