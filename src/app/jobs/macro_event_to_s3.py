@@ -13,6 +13,7 @@ from app.parser_settings.constants import (
     DEFAULT_S3_BUCKET,
     DEFAULT_S3_PREFIX,
     DEFAULT_APP_NAME,
+    DEFAULT_BINANCE_INTERVAL,
 )
 
 CURRENT_FILE = Path(__file__).resolve()
@@ -73,6 +74,12 @@ def main():
 
     df = (
         df
+        .withColumn("period_month", F.col("extra.period_month"))
+        .withColumn("local_time_str", F.col("extra.local_time_str"))
+        .drop("extra")
+        .withColumn("actual", F.col("actual").cast("double"))
+        .withColumn("forecast", F.col("forecast").cast("double"))
+        .withColumn("previous", F.col("previous").cast("double"))
         .withColumn("event_year", F.year("event_date"))
         .withColumn("event_month", F.month("event_date"))
         .withColumn(
@@ -81,26 +88,23 @@ def main():
                 "-",
                 F.col("event_type"),
                 F.date_format("event_date", "yyyy-MM-dd"),
-            )
+            ),
         )
     )
 
-    base_path = f"s3a://{DEFAULT_S3_BUCKET}"
-    prefix = (DEFAULT_S3_PREFIX or "").strip("/")
-    if prefix:
-        base_path += f"/{prefix}"
-    base_path += "/events"
+    base_path = f"s3a://{DEFAULT_S3_BUCKET}/{DEFAULT_S3_PREFIX}/kline={DEFAULT_BINANCE_INTERVAL}/event"
 
     (
         df.write
-        .mode("overwrite")
+        .mode("append")
+        .option("header", True)
+        .option("escape", "\"")
         .partitionBy("source", "event_type", "event_year", "event_month")
-        .json(base_path)
+        .csv(base_path)
     )
 
     total = df.count()
     print(f"[manual_macro] Written {total} events to {base_path}")
-
     spark.stop()
 
 

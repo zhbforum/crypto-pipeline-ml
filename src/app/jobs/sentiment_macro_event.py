@@ -13,6 +13,7 @@ from app.parser_settings.constants import (
     DEFAULT_S3_BUCKET,
     DEFAULT_S3_PREFIX,
     DEFAULT_APP_NAME,
+    DEFAULT_BINANCE_INTERVAL,
 )
 
 CURRENT_FILE = Path(__file__).resolve()
@@ -69,14 +70,13 @@ def _ensure_event_type(df: DataFrame) -> DataFrame:
     if "event_type" in df.columns:
         return df
 
-    df = df.withColumn(
+    return df.withColumn(
         "event_type",
         F.when(
             F.col("event_id").isNotNull(),
             F.regexp_extract(F.col("event_id"), r"^([^-]+)", 1),
         ).otherwise(F.lit("unknown")),
     )
-    return df
 
 
 def _with_event_sentiment(df: DataFrame) -> DataFrame:
@@ -93,26 +93,34 @@ def _with_event_sentiment(df: DataFrame) -> DataFrame:
 
     return (
         df.withColumn("event_delta", delta)
-          .withColumn("event_sentiment", sentiment)
+          .withColumn("event_sentiment", sentiment.cast("int"))
     )
 
 
 def main() -> None:
     spark = _build_spark()
 
-    base_path = f"s3a://{DEFAULT_S3_BUCKET}"
-    prefix = (DEFAULT_S3_PREFIX or "").strip("/")
-    if prefix:
-        base_path += f"/{prefix}"
+    base_path = f"s3a://{DEFAULT_S3_BUCKET}/{DEFAULT_S3_PREFIX}/kline={DEFAULT_BINANCE_INTERVAL}/event"
 
-    events_root = base_path + "/events"
-    manual_macro_path = events_root + "/source=manual_macro"
+    manual_macro_path = f"{base_path}/source=manual_macro"
+    print(f"[sentiment_macro_event] Reading CSV from: {manual_macro_path}")
 
-    print(f"[sentiment_macro_event] Reading from: {manual_macro_path}")
-    df = spark.read.json(manual_macro_path)
+    df = (
+        spark.read
+        .option("header", True)
+        .option("inferSchema", True)
+        .csv(manual_macro_path)
+    )
 
     df = df.withColumn("event_date", F.to_date("event_date"))
+
     df = _ensure_event_type(df)
+
+    for c in ("actual", "previous", "forecast"):
+        if c in df.columns:
+            df = df.withColumn(c, F.col(c).cast("double"))
+
+    df = _with_event_sentiment(df)
 
     df = (
         df
@@ -121,24 +129,20 @@ def main() -> None:
         .withColumn("source", F.lit("macro_sentiment"))
     )
 
-    df = _with_event_sentiment(df)
-
     total = df.count()
-    print(f"[sentiment_macro_event] Total events to write (after sentiment + dedup): {total}")
+    print(f"[sentiment_macro_event] Total events to write: {total}")
 
-    print(f"[sentiment_macro_event] Writing to: {events_root}")
+    print(f"[sentiment_macro_event] Writing CSV to: {base_path}")
     (
         df.write
         .mode("append")
+        .option("header", True)
+        .option("escape", "\"")
         .partitionBy("source", "event_type", "event_year", "event_month")
-        .json(events_root)
+        .csv(base_path)
     )
 
-    print(
-        "[sentiment_macro_event] Written "
-        f"{total} events under source=macro_sentiment to {events_root}"
-    )
-
+    print(f"[sentiment_macro_event] Written {total} events under source=macro_sentiment to {base_path}")
     spark.stop()
 
 
