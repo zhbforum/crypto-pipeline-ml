@@ -1,4 +1,3 @@
-# scripts/download_finbert.py
 from huggingface_hub import snapshot_download
 
 snapshot_download(

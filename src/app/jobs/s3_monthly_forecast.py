@@ -14,7 +14,7 @@ from app.lib.logger import get_logger
 
 def _load_project_env() -> None:
     root = Path.cwd()
-    env_path = root / ".env"
+    env_path = root / "src/app/jobs/.env"
     if env_path.is_file():
         load_dotenv(env_path)
     else:
@@ -179,13 +179,14 @@ def run() -> None:
 
     logger.info("Loaded columns: %s", raw_df.columns)
 
-    required_cols = {"date", "symbol", "close"}
+    required_cols = {"iso_ts", "symbol", "close"}
+
     missing = required_cols - set(raw_df.columns)
     if missing:
         raise ValueError(f"Missing expected columns {missing}, got: {raw_df.columns}")
 
-    df = raw_df.select("date", "symbol", "close").withColumn(
-        "ds", F.col("date").cast("date")
+    df = raw_df.select("iso_ts", "symbol", "close").withColumn(
+        "ds", F.to_timestamp("iso_ts").cast("date")
     )
 
     daily_df = (

@@ -56,12 +56,12 @@ def interval_seconds(interval: str) -> int:
 
 DAILY_AGG_PATH: Final[str] = os.getenv(
     "DAILY_AGG_PATH",
-    "s3a://crypto-pipeline-ml/silver/kline_1m/",
+    "s3a://crypto-pipeline-ml/silver/kline=1d/symbol=BTCUSDT/",
 )
 
 DAILY_FORECAST_PATH: Final[str] = os.getenv(
     "DAILY_FORECAST_PATH",
-    "s3a://crypto-pipeline-ml/gold/predictions_montly/",
+    "s3a://crypto-pipeline-ml/silver/predictions_montly/",
 )
 
 SPARK_PACKAGES: Final[str] = (
@@ -72,5 +72,5 @@ AWS_DEFAULT_REGION: Final[str] = os.getenv("AWS_DEFAULT_REGION", "eu-north-1")
 AWS_ACCESS_KEY_ID: Final[str] = os.getenv("AWS_ACCESS_KEY_ID", "")
 AWS_SECRET_ACCESS_KEY: Final[str] = os.getenv("AWS_SECRET_ACCESS_KEY", "")
 
-FORECAST_START_DS: Final[str | None] = os.getenv("FORECAST_START_DS")  
-FORECAST_END_DS: Final[str | None] = os.getenv("FORECAST_END_DS")      
+FORECAST_START_DS = "2025-11-01"
+FORECAST_END_DS = "2025-11-30"    
