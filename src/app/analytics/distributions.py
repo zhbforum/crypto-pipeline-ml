@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
-from app.analytics.setdata import load_btc_daily_returns
+from app.analytics.dataset import load_btc_daily_returns
 
 
 def fit_normal(series: pd.Series) -> Tuple[float, float]:
