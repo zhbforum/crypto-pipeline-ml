@@ -7,7 +7,7 @@ from typing import Optional, Tuple
 import matplotlib.pyplot as plt
 import numpy as np
 
-from app.analytics.setdata import load_btc_daily_close, load_btc_daily_returns
+from app.analytics.dataset import load_btc_daily_close, load_btc_daily_returns
 from app.analytics.distributions import fit_student_t
 
 
