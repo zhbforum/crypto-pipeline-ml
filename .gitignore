@@ -212,3 +212,6 @@ models*
 
 data/manual_macro_events.jsonl
 data/trump_truthsocial_since_2025-01-20.jsonl
+
+data/raw
+data/raw/binance_kline.csv
