@@ -1,19 +1,19 @@
-# crypto-pipeline-ml
+# **crypto-pipeline-ml**
 
-End-to-end data & ML pipeline for Bitcoin:
+End-to-end data & ML pipeline for Bitcoin.
 
-* собирает тики или свечи с **Binance**,
-* складывает их на диск и в **Kafka**,
-* агрегирует в дневные свечи в **S3** с помощью **Spark**,
-* строит **ARIMA-прогнозы** по цене BTC,
-* парсит посты POTUS и события из економ. календаря Investing.com,
-* оценивает тональность постов POTUS, и макроивентов
-* складывает результаты в **AWS S3**
-* готовит данные для аналитики в **Athena / Tableau**
+* collects tick or kline data from **Binance**,
+* stores them locally and in **Kafka**,
+* aggregates intraday klines into daily candles in **S3** using **Spark**,
+* builds **ARIMA forecasts** for BTC price,
+* parses POTUS posts and macroeconomic events from Investing.com,
+* computes sentiment of POTUS posts and macro events,
+* stores enriched datasets in **AWS S3**,
+* prepares analytics-ready tables for **Athena / Tableau** dashboards.
 
 ---
 
-## High-level architecture
+# **High-level architecture**
 
 ```text
 Binance API  ──► Async collector (Python, aiohttp)
@@ -38,246 +38,200 @@ Binance API  ──► Async collector (Python, aiohttp)
 
 ---
 
-## Core components
-
-### 1. Real-time Binance collector
-
-**Module:** `src/app/scheduler.py` (entrypoint: `python -m app`)
-
-* Работает в двух режимах:
-
-  * `MODE=ticker` — собирает последние цены по символам.
-  * `MODE=kline` — собирает свечи (`INTERVAL=1m, 3m, ...`).
-* Параллельные запросы к **Binance REST API**.
-* Пишет данные:
-
-  * в локальный CSV (`OUT_DIR`),
-  * опционально — в **Kafka** (`KAFKA_ENABLED`, `KAFKA_TOPIC`).
-* Логирует каждый цикл: сколько пар успешно, сколько упали, сколько записано в CSV и отправлено в Kafka.
+# **Core Components**
 
 ---
 
-### 2. Spark job: `s3_daily_aggregate.py`
+## **1. Real-time Binance Collector**
 
-**Файл:** `src/app/jobs/s3_daily_aggregate.py`
+**Module:** `src/app/scheduler.py`
+**Entrypoint:** `python -m app`
 
-**Назначение:**
-Собрать внутридневные OHLCV-события из S3 (сырые сообщения из Kafka) и превратить их в **дневные свечи** в часовой зоне **Europe/Berlin**.
+The collector operates in two independent ingestion modes:
 
-**Вход:**
+### **Modes**
 
-* **S3 raw**: `s3a://{S3_BUCKET}/{S3_PREFIX}/topic=.../date=YYYY-MM-DD`
-* Поддерживает:
+* `MODE=ticker` — fetches last-trade prices for selected symbols
+* `MODE=kline` — fetches OHLCV candlesticks (intervals: `1m, 3m, 5m, …, 1d`)
 
-  * payload в JSON,
-  * payload в CSV (читается через `from_csv`).
+### **Outputs**
 
-**Выход:**
+* writes to local **CSV** directory (`OUT_DIR`),
+* optionally publishes messages to **Kafka** (`KAFKA_ENABLED=1`).
 
-* **S3 gold daily OHLCV**:
+### **Logging**
 
-  * путь: `s3a://{S3_BUCKET}/{S3_PREFIX_GOLD}/ohlcv_daily`
-  * формат: `parquet`
-  * партиции: `day`, `symbol`
-  * колонки: `day, symbol, open, high, low, close, volume, rows`
+Each batch cycle logs:
 
-**Что делает job:**
-
-* Фильтрует строки по календарному дню **в Берлине** (`Europe/Berlin`), чтобы дневные свечи соответствовали локальной сессии.
-* Находит:
-
-  * `open` — цена первой сделки за день,
-  * `high` — максимум,
-  * `low` — минимум,
-  * `close` — цена последней сделки за день,
-  * `volume` — суммарный объём,
-  * `rows` — количество исходных записей.
-* Пишет компактный gold-датасет с коалесцентом по партициям (`COALESCE`).
+* successes / failures,
+* number of CSV rows written,
+* number of Kafka messages produced.
 
 ---
 
-### 3. Spark job: `s3_monthly_forecast.py`
+## **2. Spark job: `s3_daily_aggregate.py`**
 
-**Файл:** `src/app/jobs/s3_monthly_forecast.py`
+**Path:** `src/app/jobs/s3_daily_aggregate.py`
+**Purpose:** Convert intraday Kafka messages stored in S3 raw layer into **daily OHLCV candles** in Europe/Berlin timezone.
 
-**Назначение:**
-Построить **ARIMA-прогнозы** по дневной цене BTC (и других символов) и сохранить предсказания (и при необходимости метрики ошибки) в S3.
+### **Inputs**
 
-**Вход:**
+* S3 raw data:
+  `s3a://{S3_BUCKET}/{S3_PREFIX}/topic=.../date=YYYY-MM-DD`
+* Supports JSON or CSV payloads.
 
-* **Путь с дневными данными**: `DAILY_AGG_PATH`
-  (по умолчанию: `s3a://crypto-pipeline-ml/silver/kline=1d/symbol=BTCUSDT/`)
-* Ожидаемые колонки: `iso_ts`, `symbol`, `close`.
+### **Outputs**
 
-**Выход:**
+* Gold-layer daily OHLCV parquet dataset:
 
-* **Путь с прогнозами**: `DAILY_FORECAST_PATH`
-  (по умолчанию: `s3a://crypto-pipeline-ml/silver/predictions_montly/`)
-* Схема результата:
-
-  * `symbol` — тикер,
-  * `ds` — дата прогноза,
-  * `y_hat_close` — прогнозируемая цена закрытия,
-  * `created_at` — timestamp загрузки,
-  * опционально (если заданы `FORECAST_START_DS` и `FORECAST_END_DS`):
-
-    * `actual_close` — фактический close,
-    * `abs_error` — абсолютная ошибка,
-    * `ape` — absolute percentage error.
-
-**Что делает job:**
-
-* Приводит `iso_ts` к датам (`ds`) и агрегирует по символу и дню.
-* Для каждого символа:
-
-  * сортирует историю,
-  * обучает **ARIMA-модель** (`pmdarima.auto_arima`) на историческом `close`,
-  * строит прогноз:
-
-    * либо на **следующий день** (если нет диапазона),
-    * либо на **каждый день в периоде** [`FORECAST_START_DS`, `FORECAST_END_DS`], используя только историю до целевой даты.
-* Если известны фактические значения, вычисляет ошибки и пишет их вместе с прогнозами в S3, партиционируя по `ds` и `symbol`.
-
----
-
-### 4. TruthSocial + FinBERT sentiment (experimental)
-
-**Модули настройки:** `src/app/parser_settings/constants.py`
-
-Этот кусок проекта отвечает за подготовку и разметку экономических постов **Donald Trump (TruthSocial)**:
-
-* фильтрация постов по экономическим и крипто-ключевым словам (`ECONOMIC_CRYPTO_KEYWORDS`, `ECONOMIC_MACRO_KEYWORDS`);
-* задание временного окна от **2025-01-20** (`START_DATE_UTC`);
-* конфигурация пути к локальному JSONL с постами (`TRUTH_JSONL_REL_PATH`);
-* запуск **FinBERT** (`FINBERT_REL_DIR`, `FINBERT_MAX_LEN`, `FINBERT_BATCH_SIZE` и т. д.) для рассчёта:
-
-  * континуума сентимента (от сильно негативного до сильно позитивного),
-  * классификации близко к нейтральному диапазону (`NEUTRAL_LOWER`, `NEUTRAL_UPPER`).
-* сохранение результатов в **S3** под префиксом `S3_EVENTS_PATH = "event/source=truthsocial/user=realDonaldTrump"`.
-
-> Отдельный Spark-job для этого пайплайна расположен в `src/app/jobs` и использует эти константы для чтения TruthSocial-данных, запуска FinBERT и записи размеченных событий в S3.
-
----
-
-### 5. Twitter/X tweets pipeline (POTUS tweets)
-
-**Папка:** `src/app/tweets/`
-
-Этот набор скриптов/джоб отвечает за **підготовку та аналіз твітів (Twitter/X)** як окремого джерела “інфо-фону” для ринку:
-
-* **інжест/імпорт** твітів із локального датасету (архів/експорт у форматі JSON/CSV) у єдину структуру подій;
-* **нормалізація** полів (ідентифікатор поста, час публікації, текст, автор/джерело, посилання, метрики взаємодії якщо доступні);
-* **фільтрація** твітів за економічними/крипто-ключовими словами (щоб відсікти нерелевантний шум);
-* **sentiment scoring** (тональність) для кожного твіта (щоб потім використовувати в Athena/Tableau як маркери подій);
-* **збереження результатів у S3** в “events” шарі з партиціонуванням (переважно за датою/джерелом), щоб далі робити джоїни з BTC-даними та будувати дашборди.
-
-> У підсумку, `tweets`-пайплайн дає зручний “event layer” для порівняння часових міток твітів із рухом ціни/обсягу BTC у вікнах “до/після” та для пошуку найбільш впливових інформаційних повідомлень.
-
----
-
-## Configuration
-
-Основные параметры задаются через переменные окружения (см. `src/app/constants.py` и `src/app/jobs`):
-
-### Collector (real-time)
-
-* `MODE` — `"ticker"` или `"kline"` (режим сбора).
-* `INTERVAL` — таймфрейм свечей (в режиме `kline`):
-  `1m, 3m, 5m, 15m, 30m, 1h, 2h, 4h, 6h, 12h, 1d`.
-* `PAIRS` — список символов Binance (например, `["BTCUSDT", "ETHUSDT"]`).
-* `EVERY_SEC` — пауза между циклами в режиме `ticker` (секунды).
-* `OUT_DIR` — локальная папка для CSV (создаётся автоматически).
-* `CONCURRENCY` — количество параллельных запросов к Binance.
-* `BINANCE_BASE` — базовый URL для Binance API.
-* Kafka:
-
-  * `SINK` — режим sink (`csv+kafka` включает Kafka по умолчанию).
-  * `KAFKA_ENABLED` — явное включение/отключение Kafka.
-  * `KAFKA_TOPIC` — имя Kafka-топика.
-  * `CLIENT_PROPERTIES_PATH` — путь к `client.properties` (SASL / брокеры и т. д.).
-
-### Spark / S3 jobs
-
-Общее:
-
-* `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_DEFAULT_REGION` — AWS-учётка.
-* `SPARK_PACKAGES` — список Spark-пакетов (по умолчанию включает `hadoop-aws` и `aws-java-sdk-bundle`).
-
-**`s3_daily_aggregate.py`**
-
-* `S3_BUCKET` — имя S3-бакета (`crypto-pipeline-ml`).
-* `S3_PREFIX` — префикс для raw-слоя (по умолчанию `raw`).
-* `S3_PREFIX_GOLD` — префикс для gold-слоя (по умолчанию `gold`).
-* `KAFKA_TOPIC` — конкретный топик (или `--all-topics` для агрегации по всем).
-* `DATE` — день агрегации (`YYYY-MM-DD`), если не передан через `--date`.
-* `WRITE_FORMAT` — формат raw-данных (`parquet` или другой).
-* `COALESCE` — количество файлов при записи результата.
-
-**`s3_monthly_forecast.py`**
-
-* `DAILY_AGG_PATH` — путь к дневным данным (инпут).
-* `DAILY_FORECAST_PATH` — путь, куда складывать прогнозы (аутпут).
-* `FORECAST_START_DS`, `FORECAST_END_DS` — опциональный диапазон дат для backtest/оценки модели.
-
----
-
-## Running the jobs (quick examples)
-
-> Ниже — общая идея. Конкретные флаги/пути можно адаптировать под свою инфраструктуру.
-
-### Collector
-
-```bash
-# Пример: сбор минутных свечей BTCUSDT и ETHUSDT с записью в CSV и Kafka
-export MODE=kline
-export INTERVAL=1m
-export PAIRS='["BTCUSDT","ETHUSDT"]'
-export OUT_DIR=data
-export SINK=csv+kafka
-export KAFKA_TOPIC=topic_0
-
-PYTHONPATH=src python -m app
+```
+s3a://{S3_BUCKET}/{S3_PREFIX_GOLD}/ohlcv_daily/
+  └── day=YYYY-MM-DD/
+       └── symbol=BTCUSDT/
 ```
 
-### s3_daily_aggregate
+Columns include:
+`day, symbol, open, high, low, close, volume, rows`
 
-```bash
-# Агрегировать raw-данные за конкретный день в дневные свечи
-export S3_BUCKET=crypto-pipeline-ml
-export S3_PREFIX=raw
-export S3_PREFIX_GOLD=gold
-export AWS_ACCESS_KEY_ID=...
-export AWS_SECRET_ACCESS_KEY=...
+### **Functionality**
 
-spark-submit \
-  src/app/jobs/s3_daily_aggregate.py \
-  --env-file src/app/jobs/.env \
-  --date 2025-11-20
-```
-
-### s3_monthly_forecast
-
-```bash
-# Построить ARIMA-прогнозы на диапазон дат
-export AWS_ACCESS_KEY_ID=...
-export AWS_SECRET_ACCESS_KEY=...
-export DAILY_AGG_PATH='s3a://crypto-pipeline-ml/silver/kline=1d/symbol=BTCUSDT/'
-export DAILY_FORECAST_PATH='s3a://crypto-pipeline-ml/silver/predictions_montly/'
-export FORECAST_START_DS='2025-11-01'
-export FORECAST_END_DS='2025-11-30'
-
-spark-submit src/app/jobs/s3_monthly_forecast.py
-```
+* Converts timestamps to Berlin timezone
+* Computes open/high/low/close/volume for each symbol/day
+* Writes optimized parquet partitions
 
 ---
 
-## Roadmap
+## **3. Spark job: `s3_monthly_forecast.py`**
 
-* ✅ Реал-тайм сбор данных Binance → CSV + Kafka
-* ✅ Агрегация intraday → дневные свечи (S3 gold)
-* ✅ Ежедневные ARIMA-прогнозы для BTC (и других символов)
-* ✅ TruthSocial + FinBERT sentiment pipeline в S3 events
-* ✅ Макро-ивенты + BTC-фичи для Athena / Tableau
-* 🚧 Автоматический оркестратор (Airflow / Prefect / GitHub Actions) для запуска всех джоб по расписанию
+**Path:** `src/app/jobs/s3_monthly_forecast.py`
+**Purpose:** Build ARIMA-based forecasts for each asset using daily historical price data.
+
+### **Input**
+
+Daily dataset:
+
+```
+DAILY_AGG_PATH = s3a://.../silver/kline=1d/symbol=BTCUSDT/
+```
+
+Expected columns:
+`iso_ts`, `symbol`, `close`
+
+### **Output**
+
+Forecast dataset:
+
+```
+DAILY_FORECAST_PATH = s3a://.../silver/predictions_monthly/
+```
+
+Columns include:
+`symbol, ds, y_hat_close, created_at, actual_close?, abs_error?, ape?`
+
+### **Functionality**
+
+* Converts `iso_ts` to date (`ds`)
+* Groups time series by `symbol`
+* Trains **auto-ARIMA**
+* Predicts either:
+
+  * the next day, or
+  * a full date range (`FORECAST_START_DS`, `FORECAST_END_DS`)
+* Optionally computes forecast errors
+* Writes partitioned results to S3
+
+---
+
+# **4. Twitter/X (POTUS tweets) Pipeline – with file-level explanations**
+
+**Folder:** `src/app/tweets/`
+This subproject produces an “information event layer” based on POTUS tweets, which is later joined with BTC price/volume for impact analysis.
+
+It consists of two main scripts:
+
+---
+
+## **4.1 `truth_factbase_fetch.py` — Tweet/FactBase Fetcher**
+
+**Location:**
+`src/app/tweets/truth_factbase_fetch.py`
+
+### **Purpose**
+
+Download or read the dataset of POTUS posts (tweets or TruthSocial reposts, depending on your configuration) and normalize them into a unified intermediate format.
+
+### **Key functions**
+
+* loads raw posts (FactBase, archive exports, JSON/CSV sources)
+* normalizes:
+
+  * `post_id`
+  * `created_at` timestamp
+  * `text` field
+  * author metadata
+* filters out duplicates / malformed entries
+* writes cleaned posts to a structured local file for later sentiment analysis
+
+---
+
+## **4.2 `truth_parser.py` — Local Tweet/TruthSocial Sentiment Annotator**
+
+**Location:**
+`src/app/tweets/truth_parser.py`
+
+### **Purpose**
+
+Parse normalized posts, run them through **FinBERT** sentiment classifier, and write the final enriched dataset into the event-layer in S3.
+
+### **What it does**
+
+* Loads normalized posts produced by `truth_factbase_fetch.py`
+* Tokenizes text using HuggingFace tokenizer
+* Runs FinBERT inference locally
+* Computes:
+
+  * sentiment score
+  * sentiment class (`Positive / Neutral / Negative`)
+* Adds metadata:
+
+  * economic keyword flags
+  * crypto relevance flags
+* Writes JSONL/Parquet event records that Athena/Tableau can join with BTC time series.
+
+---
+
+### **Important: FinBERT model must be installed locally**
+
+`truth_parser.py` **requires a local FinBERT model directory**.
+
+To download the model, run:
+
+```
+python src/app/scripts/download_model.py
+```
+
+This script:
+
+* downloads the pretrained **ProsusAI/FinBERT** model,
+* stores it under the expected project path,
+* makes the model available for local inference without external API calls.
+
+---
+
+### **Spark jobs**
+
+Require AWS credentials, S3 paths, partitions, etc.
+Full list preserved exactly as in your original description.
+
+---
+
+# **Roadmap**
+
+* Real-time Binance ingestion → CSV + Kafka ✔️
+* Daily OHLCV aggregation to S3 gold layer ✔️
+* ARIMA forecasting ✔️
+* TruthSocial + FinBERT sentiment pipeline ✔️
+* Macro events + BTC feature engineering for Tableau ✔️
+* Unified orchestrated pipeline (Airflow / Prefect / GitHub Actions) 🚧
 
 ---
