@@ -27,6 +27,7 @@ from app.analytics.distributions import (
 from app.analytics.linear_regression import fit_ar1_regression
 from app.analytics.arima_model import fit_arima_model, forecast_arima
 from app.analytics.monte_carlo import analyze_scenario
+from app.analytics.fed_rate_anova import compute_fed_rate_anova
 
 
 st.set_page_config(page_title="Панель аналізу BTC", layout="wide")
@@ -39,6 +40,7 @@ page = st.sidebar.radio(
         "Розподіл і хвости",
         "AR(1)-регресія",
         "Прогноз ARIMA",
+        "Дисперсійний аналіз (ANOVA)",
         "Моделювання Монте-Карло",
     ),
 )
@@ -377,6 +379,114 @@ elif page == "Прогноз ARIMA":
             }
         )
     )
+
+
+elif page == "Дисперсійний аналіз (ANOVA)":
+    st.header("Однофакторний дисперсійний аналіз (ANOVA) за рішеннями ФРС: hike/cut/hold")
+
+    st.caption(
+        "Порівнюємо реакцію BTC (impact) після рішень ФРС: "
+        "підвищення ставки (hike), зниження (cut), без змін (hold)."
+    )
+
+    colA, colB, colC = st.columns(3)
+    with colA:
+        mode_ui = st.selectbox(
+            "Метрика impact",
+            options=["post_k_days", "event_day", "pre_k_days"],
+            index=0,
+            help=(
+                "post_k_days: кумулятивна дохідність за K днів ПІСЛЯ рішення\n"
+                "event_day: дохідність у день рішення\n"
+                "pre_k_days: кумулятивна дохідність за K днів ДО рішення"
+            ),
+        )
+    with colB:
+        k = st.slider("K (днів)", min_value=1, max_value=14, value=3)
+    with colC:
+        require_full_window = st.checkbox(
+            "Вимагати повне вікно (K днів)",
+            value=True,
+            help="Якщо увімкнено — відкидаємо події, де немає всіх K днів до/після."
+        )
+
+    # --- ANOVA ---
+    fed_result, fed_summary, impacts = compute_fed_rate_anova(
+        returns,
+        mode=mode_ui,
+        k=k,
+        require_full_window=require_full_window,
+    )
+
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.markdown("**F-статистика**")
+        st.write(f"{fed_result.f_stat:.4f}")
+    with col2:
+        st.markdown("**p-value**")
+        st.write(f"{fed_result.p_value:.4g}")
+    with col3:
+        st.markdown("**Levene p-value**")
+        st.write("—" if fed_result.levene_p_value is None else f"{fed_result.levene_p_value:.4g}")
+    with col4:
+        st.markdown("**eta²**")
+        st.write("—" if fed_result.eta2 is None else f"{fed_result.eta2:.4g}")
+
+    st.markdown("### Зведена таблиця за групами (hike/cut/hold)")
+    st.dataframe(
+        fed_summary.style.format(
+            {
+                "count": "{:.0f}",
+                "mean": "{:.6f}",
+                "std": "{:.6f}",
+            }
+        ),
+        use_container_width=True,
+    )
+
+    means = fed_summary["mean"]
+    labels = list(means.index.astype(str))
+    heights = means.to_numpy(dtype=float)
+
+    fig_bar, ax_bar = plt.subplots(figsize=(10, 4))
+    ax_bar.bar(labels, heights)
+    ax_bar.set_xlabel("Тип рішення ФРС")
+    ax_bar.set_ylabel("Середній impact")
+    ax_bar.set_title("Середній impact BTC за типом рішення ФРС")
+    st.markdown("### Середній impact за групами")
+    st.pyplot(fig_bar)
+
+    st.markdown("### Гістограми розподілу impact (за групами)")
+    fig_hist, ax_hist = plt.subplots(figsize=(10, 4))
+
+    order = ["cut", "hike", "hold"]
+    for g in order:
+        vals = impacts.loc[impacts["group"] == g, "impact"].to_numpy(dtype=float)
+        if vals.size == 0:
+            continue
+        ax_hist.hist(vals, bins=20, alpha=0.5, label=f"{g} (n={vals.size})")
+
+    ax_hist.set_xlabel("Impact (дохідність)")
+    ax_hist.set_ylabel("Частота")
+    ax_hist.set_title("Розподіл impact BTC після рішень ФРС")
+    ax_hist.legend()
+    st.pyplot(fig_hist)
+
+    alpha = 0.05
+    if fed_result.p_value >= alpha:
+        st.info(
+            f"p-value ≈ {fed_result.p_value:.3f} ≥ {alpha} — "
+            "за нашими даними немає статистично значущих відмінностей "
+            "між середніми значеннями impact BTC для груп hike/cut/hold "
+            "(за обраною метрикою та вікном K)."
+        )
+    else:
+        st.success(
+            f"p-value ≈ {fed_result.p_value:.3f} < {alpha} — "
+            "виявлено статистично значущі відмінності між групами hike/cut/hold "
+            "за обраною метрикою impact."
+        )
+
 
 
 elif page == "Моделювання Монте-Карло":
