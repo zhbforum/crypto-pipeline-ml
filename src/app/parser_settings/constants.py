@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 
 BINANCE_BASE_URL = "https://data.binance.vision"
-DEFAULT_BINANCE_INTERVAL = "1h"
+DEFAULT_BINANCE_INTERVAL = "4h"
 DEFAULT_BINANCE_SYMBOLS = [
     "BTCUSDT",
 ]

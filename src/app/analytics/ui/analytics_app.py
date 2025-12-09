@@ -27,6 +27,7 @@ from app.analytics.distributions import (
 from app.analytics.linear_regression import fit_ar1_regression
 from app.analytics.arima_model import fit_arima_model, forecast_arima
 from app.analytics.monte_carlo import analyze_scenario
+from app.analytics.fed_rate_anova import compute_fed_rate_anova
 
 
 st.set_page_config(page_title="Панель аналізу BTC", layout="wide")
@@ -39,6 +40,7 @@ page = st.sidebar.radio(
         "Розподіл і хвости",
         "AR(1)-регресія",
         "Прогноз ARIMA",
+        "Дисперсійний аналіз (ANOVA)",
         "Моделювання Монте-Карло",
     ),
 )
@@ -376,6 +378,53 @@ elif page == "Прогноз ARIMA":
                 "Верхня межа 95% CI, %": "{:.4f}",
             }
         )
+    )
+
+
+elif page == "Дисперсійний аналіз (ANOVA)":
+    st.header("Однофакторний дисперсійний аналіз (ANOVA) за режимами ключової ставки ФРС")
+
+    fed_result, fed_summary = compute_fed_rate_anova(returns)
+
+    col1, col2 = st.columns(2)
+    with col1:
+        st.markdown("**F-статистика**")
+        st.write(f"{fed_result.f_stat:.4f}")
+    with col2:
+        st.markdown("**p-value**")
+        st.write(f"{fed_result.p_value:.4g}")
+
+    st.markdown("### Зведена таблиця за режимами ставки")
+    st.dataframe(
+        fed_summary.style.format(
+            {
+                "count": "{:.0f}",
+                "mean": "{:.6f}",
+                "std": "{:.6f}",
+            }
+        )
+    )
+
+    means_fed = fed_summary["mean"]
+
+    labels = list(means_fed.index.astype(str))
+    heights = means_fed.to_numpy(dtype=float)
+
+    fig_f, ax_f = plt.subplots(figsize=(10, 4))
+    ax_f.bar(labels, heights)
+    ax_f.set_xlabel("Режим ключової ставки ФРС")
+    ax_f.set_ylabel("Середня денна дохідність")
+    ax_f.set_title("Середні денні дохідності BTC за режимами ставки ФРС")
+    plt.xticks(rotation=20)
+    st.markdown("### Середні денні дохідності за режимами ставки ФРС")
+    st.pyplot(fig_f)
+
+    st.info(
+        "p-value ≈ "
+        f"{fed_result.p_value:.3f} > 0.05 — за нашими даними, "
+        "різниця між середніми денними дохідностями BTC у режимах "
+        "низької, середньої та високої ключової ставки ФРС не є "
+        "статистично значущою (α = 0.05)."
     )
 
 

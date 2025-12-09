@@ -2,45 +2,49 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timezone
 from pathlib import Path
+
 from app.timeutil import interval_seconds, sleep_until_next_boundary
 from app.exchange.binance_client import BinanceClient
 from app.sinks.csv_sink import CsvSink
 from app.services.collector import CollectorService
-from app.sinks.kafka_writer import KafkaWriter
+# from app.sinks.kafka_writer import KafkaWriter   
 from app.constants import (
     MODE,
     INTERVAL,
     PAIRS,
     EVERY_SEC,
-    OUT_DIR,
+    OUT_DIR,              
     CONCURRENCY,
     BINANCE_BASE,
-    KAFKA_ENABLED,
-    KAFKA_TOPIC,
-    CLIENT_PROPERTIES_PATH,
+    # KAFKA_ENABLED,      
+    # KAFKA_TOPIC,
+    # CLIENT_PROPERTIES_PATH,
 )
+
+DATA_DIR = Path("data")
+DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 
 async def run() -> None:
     client = BinanceClient(
         base_url=BINANCE_BASE,
         max_concurrency=CONCURRENCY,
-        user_agent="binance-collector/csv+kafka-1.0",
+        user_agent="binance-collector/csv-1.0",
     )
     svc = CollectorService(client)
 
     if MODE == "ticker":
         sink = CsvSink(
-            Path(OUT_DIR) / "binance_ticker.csv",
+            DATA_DIR / "binance_ticker.csv",
             ["ts", "iso_ts", "symbol", "price"],
         )
     else:
         sink = CsvSink(
-            Path(OUT_DIR) / f"binance_kline_{INTERVAL}.csv",
+            DATA_DIR / f"binance_kline_{INTERVAL}.csv",
             ["ts", "iso_ts", "symbol", "interval", "open", "high", "low", "close", "volume"],
         )
 
-    kafka_writer = KafkaWriter.from_properties(CLIENT_PROPERTIES_PATH, KAFKA_TOPIC) if KAFKA_ENABLED else None
+    # kafka_writer = KafkaWriter.from_properties(CLIENT_PROPERTIES_PATH, KAFKA_TOPIC) if KAFKA_ENABLED else None
 
     cycle = 0
     if MODE == "kline":
@@ -58,16 +62,16 @@ async def run() -> None:
             else:
                 ok, fail, wrote_csv, rows = 0, len(PAIRS), 0, []
 
-            sent_to_kafka = 0
-            if kafka_writer and rows:
-                sent_to_kafka = kafka_writer.send_batch(rows)
+            # sent_to_kafka = 0
+            # if kafka_writer and rows:
+            #     sent_to_kafka = kafka_writer.send_batch(rows)
 
             dt = asyncio.get_event_loop().time() - t0
             extra = f" {INTERVAL}" if MODE == "kline" else ""
             print(
                 f"{datetime.now(timezone.utc).isoformat()} | {MODE}{extra} | "
                 f"pairs={len(PAIRS)} ok={ok} fail={fail} wrote_csv={wrote_csv} "
-                f"kafka={sent_to_kafka} dt={dt:.2f}s"
+                f"dt={dt:.2f}s"
             )
 
             if MODE == "ticker":
