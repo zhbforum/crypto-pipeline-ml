@@ -40,7 +40,7 @@ page = st.sidebar.radio(
         "Розподіл і хвости",
         "AR(1)-регресія",
         "Прогноз ARIMA",
-        "Дисперсійний аналіз (ANOVA)",
+        "Дисперсійний аналіз",
         "Моделювання Монте-Карло",
     ),
 )
@@ -381,8 +381,8 @@ elif page == "Прогноз ARIMA":
     )
 
 
-elif page == "Дисперсійний аналіз (ANOVA)":
-    st.header("Однофакторний дисперсійний аналіз (ANOVA) за рішеннями ФРС: hike/cut/hold")
+elif page == "Дисперсійний аналіз":
+    st.header("Однофакторний дисперсійний аналіз за рішеннями ФРС: hike/cut/hold")
 
     st.caption(
         "Порівнюємо реакцію BTC (impact) після рішень ФРС: "
@@ -410,7 +410,6 @@ elif page == "Дисперсійний аналіз (ANOVA)":
             help="Якщо увімкнено — відкидаємо події, де немає всіх K днів до/після."
         )
 
-    # --- ANOVA ---
     fed_result, fed_summary, impacts = compute_fed_rate_anova(
         returns,
         mode=mode_ui,
