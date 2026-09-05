@@ -14,8 +14,8 @@ from dotenv import load_dotenv
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import col, date_format
 
-from src.app.constants import KAFKA_TOPIC, BERLIN, UTC
-from src.app.lib.logger import get_logger
+from app.constants import KAFKA_TOPIC, BERLIN, UTC
+from app.lib.logger import get_logger
 
 log = get_logger("kafka_daily_to_s3")
 
@@ -51,7 +51,8 @@ def ensure_winutils() -> None:
     bin_path = os.path.join(hadoop_home, "bin")
     exe_path = os.path.join(bin_path, "winutils.exe")
     if not os.path.exists(exe_path):
-        raise SystemExit(f"winutils.exe not found: {exe_path}. Download it for Hadoop 3.4.x and place it in {bin_path}.")
+        raise SystemExit(
+            f"winutils.exe not found: {exe_path}. Download it for Hadoop 3.4.x and place it in {bin_path}.")
     if bin_path not in os.environ.get("PATH", ""):
         os.environ["PATH"] = f"{bin_path};{os.environ['PATH']}"
 
@@ -61,7 +62,8 @@ def get_day_bounds_utc_ms(day_str: Optional[str]) -> Tuple[int, int, str]:
         local_day = BERLIN.localize(datetime.strptime(day_str, "%Y-%m-%d"))
     else:
         now_local = datetime.now(BERLIN)
-        local_day = BERLIN.localize(datetime(now_local.year, now_local.month, now_local.day))
+        local_day = BERLIN.localize(
+            datetime(now_local.year, now_local.month, now_local.day))
     start_local = local_day.replace(hour=0, minute=0, second=0, microsecond=0)
     end_local = start_local + timedelta(days=1)
     start_ms = int(start_local.astimezone(UTC).timestamp() * 1000)
@@ -227,13 +229,15 @@ def _apply_s3a_creds(hconf, aws_region: Optional[str]) -> None:
     secret = os.getenv("AWS_SECRET_ACCESS_KEY")
     token = os.getenv("AWS_SESSION_TOKEN")
     if access and secret:
-        hconf.set("fs.s3a.aws.credentials.provider", "org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider")
+        hconf.set("fs.s3a.aws.credentials.provider",
+                  "org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider")
         hconf.set("fs.s3a.access.key", access)
         hconf.set("fs.s3a.secret.key", secret)
         if token:
             hconf.set("fs.s3a.session.token", token)
     else:
-        hconf.set("fs.s3a.aws.credentials.provider", "com.amazonaws.auth.DefaultAWSCredentialsProviderChain")
+        hconf.set("fs.s3a.aws.credentials.provider",
+                  "com.amazonaws.auth.DefaultAWSCredentialsProviderChain")
     if aws_region:
         hconf.set("fs.s3a.endpoint", f"s3.{aws_region}.amazonaws.com")
 
@@ -264,7 +268,8 @@ def _config_from_args(args: argparse.Namespace) -> AppConfig:
     s3_bucket = get_env_str("S3_BUCKET", required=True)
     s3_prefix = get_env_str("S3_PREFIX", default="raw")
     app_name = get_env_str("APP_NAME", default="kafka_daily_to_s3")
-    write_format = get_env_str("WRITE_FORMAT", default="parquet").strip().lower()
+    write_format = get_env_str(
+        "WRITE_FORMAT", default="parquet").strip().lower()
     coalesce_parts = get_env_int("COALESCE", default=0)
     aws_region = get_env_opt_str("AWS_DEFAULT_REGION")
     date_str = args.date or get_env_opt_str("DATE")
@@ -335,7 +340,8 @@ def _write_to_s3(spark: SparkSession, cfg: AppConfig, kafka_opts: Dict[str, str]
         "fs.s3a.connection.establish.timeout",
     ):
         log.info("%s = %s", k, hconf.get(k))
-    out.write.mode("append").partitionBy("date").format(cfg.write_format).save(target)
+    out.write.mode("append").partitionBy(
+        "date").format(cfg.write_format).save(target)
     log.info("Written to %s for date=%s", target, cfg.ymd)
 
 
@@ -350,15 +356,18 @@ def main() -> None:
     os.environ["PYSPARK_DRIVER_PYTHON"] = sys.executable
     ensure_winutils()
     cfg = _config_from_args(args)
-    log.info("Day: %s (Europe/Berlin) | UTC ms: %s .. %s", cfg.ymd, cfg.window.start_ms, cfg.window.end_ms)
-    start_json, end_json = compute_offsets_by_time(cfg.bootstrap, cfg.security, cfg.topic, cfg.window)
+    log.info("Day: %s (Europe/Berlin) | UTC ms: %s .. %s",
+             cfg.ymd, cfg.window.start_ms, cfg.window.end_ms)
+    start_json, end_json = compute_offsets_by_time(
+        cfg.bootstrap, cfg.security, cfg.topic, cfg.window)
     log.info("startingOffsets: %s", start_json)
     log.info("endingOffsets  : %s", end_json)
     spark = build_spark(cfg.app_name, cfg.aws_region)
     try:
         if cfg.write_format not in ("parquet", "json"):
             raise SystemExit("WRITE_FORMAT must be 'parquet' or 'json'.")
-        _write_to_s3(spark, cfg, _kafka_reader_options(cfg, start_json, end_json))
+        _write_to_s3(spark, cfg, _kafka_reader_options(
+            cfg, start_json, end_json))
         log.info("Done.")
     finally:
         spark.stop()

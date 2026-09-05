@@ -133,7 +133,8 @@ def validate_kline_schema(df: DataFrame) -> DataFrame:
 
     df = df.dropDuplicates(["symbol", "open_ts"])
 
-    cols = ["symbol", "open_ts", "open", "high", "low", "close", "volume", "date"]
+    cols = ["symbol", "open_ts", "open", "high",
+            "low", "close", "volume", "date"]
     return df.select(*cols)
 
 
@@ -210,7 +211,8 @@ def process_month_for_symbol(
 
     df_valid = validate_kline_schema(df_raw)
 
-    df_valid = df_valid.filter((F.col("date") >= min_d) & (F.col("date") <= max_d))
+    df_valid = df_valid.filter(
+        (F.col("date") >= min_d) & (F.col("date") <= max_d))
 
     df_valid = (
         df_valid.withColumn("year", F.lit(batch.year).cast("int"))

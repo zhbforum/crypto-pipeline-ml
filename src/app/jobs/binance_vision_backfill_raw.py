@@ -63,7 +63,8 @@ def _build_spark(app_name: str) -> SparkSession:
 
     region = os.getenv("AWS_DEFAULT_REGION", DEFAULT_AWS_REGION)
     conf = (
-        conf.set("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem")
+        conf.set("spark.hadoop.fs.s3a.impl",
+                 "org.apache.hadoop.fs.s3a.S3AFileSystem")
         .set(
             "spark.hadoop.fs.s3a.aws.credentials.provider",
             "org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider",
@@ -125,7 +126,8 @@ def _parse_single_kline_row(
     try:
         open_time_raw = int(row[0])
     except (ValueError, TypeError) as exc:
-        print(f"[WARN] bad open_time for {symbol} row={row_index}: {row} ({exc})")
+        print(
+            f"[WARN] bad open_time for {symbol} row={row_index}: {row} ({exc})")
         return None
 
     open_time_ms = open_time_raw // 1000 if open_time_raw > 10**13 else open_time_raw
@@ -222,7 +224,8 @@ def _flush_month_to_s3(
         print(f"[info] no rows to flush for {year_month}")
         return
 
-    print(f"[info] flushing month {year_month} to S3 (rows={len(rows_buffer)})")
+    print(
+        f"[info] flushing month {year_month} to S3 (rows={len(rows_buffer)})")
 
     df = spark.createDataFrame(rows_buffer, schema=ROWS_SCHEMA)
     symbols = sorted({row[2] for row in rows_buffer})
@@ -329,7 +332,8 @@ def _build_backfill_config(args: argparse.Namespace) -> VisionBackfillConfig:
     )
 
     symbols = _resolve_symbols(args)
-    download_workers = int(os.getenv("DOWNLOAD_WORKERS", str(DEFAULT_DOWNLOAD_WORKERS)))
+    download_workers = int(
+        os.getenv("DOWNLOAD_WORKERS", str(DEFAULT_DOWNLOAD_WORKERS)))
 
     start_day, end_day = _resolve_date_range(args)
     app_name = os.getenv("APP_NAME", DEFAULT_APP_NAME) or DEFAULT_APP_NAME
@@ -355,7 +359,8 @@ def main() -> None:
     print(f"[info] raw_base: {config.raw_base}")
     print(f"[info] symbols: {config.symbols}")
     print(f"[info] interval: {config.interval}")
-    print(f"[info] date range (months): {config.start_day} .. {config.end_day}")
+    print(
+        f"[info] date range (months): {config.start_day} .. {config.end_day}")
     print(f"[info] download_workers: {config.download_workers}")
 
     for month_day in _iter_months(config.start_day, config.end_day):

@@ -82,9 +82,11 @@ def _get_env_str(
 def _build_spark(app_name: str) -> SparkSession:
     conf = SparkConf().setAppName(app_name).set("spark.sql.session.timeZone", "UTC")
 
-    region = os.getenv("AWS_DEFAULT_REGION", DEFAULT_AWS_REGION or "eu-north-1")
+    region = os.getenv("AWS_DEFAULT_REGION",
+                       DEFAULT_AWS_REGION or "eu-north-1")
     conf = (
-        conf.set("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem")
+        conf.set("spark.hadoop.fs.s3a.impl",
+                 "org.apache.hadoop.fs.s3a.S3AFileSystem")
         .set(
             "spark.hadoop.fs.s3a.aws.credentials.provider",
             "org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider",
@@ -205,7 +207,8 @@ def _build_backfill_config(args: argparse.Namespace) -> BackfillConfig:
     )
 
     symbols = _resolve_symbols(args)
-    download_workers = int(os.getenv("DOWNLOAD_WORKERS", str(DEFAULT_DOWNLOAD_WORKERS)))
+    download_workers = int(
+        os.getenv("DOWNLOAD_WORKERS", str(DEFAULT_DOWNLOAD_WORKERS)))
 
     start_day, end_day, start_ms, end_ms = _resolve_date_range(args)
 
@@ -304,7 +307,8 @@ def _fetch_symbol_klines_api(
         if not data:
             break
 
-        last_open_time = _append_kline_rows(rows, data, symbol, interval, end_ms)
+        last_open_time = _append_kline_rows(
+            rows, data, symbol, interval, end_ms)
         if last_open_time is None:
             break
 
@@ -328,7 +332,8 @@ def _flush_month_to_s3(
         print(f"[info] no rows to flush for {year_month}")
         return
 
-    print(f"[info] flushing month {year_month} to S3 (rows={len(rows_buffer)})")
+    print(
+        f"[info] flushing month {year_month} to S3 (rows={len(rows_buffer)})")
 
     df = spark.createDataFrame(rows_buffer, schema=ROWS_SCHEMA)
     symbols = sorted({row[2] for row in rows_buffer})

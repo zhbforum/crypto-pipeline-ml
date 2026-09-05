@@ -44,7 +44,8 @@ def load_btc_daily_returns(
     if log_returns:
         ratio = close / close.shift(1)
         returns = ratio.apply(
-            lambda x: math.log(x) if (pd.notnull(x) and x > 0) else float("nan")
+            lambda x: math.log(x) if (
+                pd.notnull(x) and x > 0) else float("nan")
         )
         returns.name = "log_return"
     else:

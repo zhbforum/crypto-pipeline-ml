@@ -2,6 +2,7 @@ import json
 import os
 import time
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple
 
 import requests
@@ -19,9 +20,9 @@ BASE_PARAMS: Dict[str, Any] = {
 START_DATE_UTC = datetime(2025, 1, 20, tzinfo=timezone.utc)
 SLEEP_SECONDS = 5
 
-OUTPUT_PATH = os.path.join(
-    os.path.dirname(__file__),
-    "trump_truthsocial_since_2025-01-20.jsonl",
+OUTPUT_PATH = str(
+    Path(__file__).resolve().parents[3]
+    / "data" / "trump_truthsocial_since_2025-01-20.jsonl"
 )
 
 

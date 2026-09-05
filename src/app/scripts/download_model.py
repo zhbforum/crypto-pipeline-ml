@@ -1,8 +1,13 @@
+from pathlib import Path
+
 from huggingface_hub import snapshot_download
 
-snapshot_download(
-    repo_id="ProsusAI/finbert",
-    local_dir="models/finbert",
-    local_dir_use_symlinks=False,
-)
-print("Downloaded to models/finbert")
+
+def main() -> None:
+    model_dir = Path(__file__).resolve().parents[3] / "models" / "finbert"
+    snapshot_download(repo_id="ProsusAI/finbert", local_dir=model_dir)
+    print(f"Downloaded to {model_dir}")
+
+
+if __name__ == "__main__":
+    main()

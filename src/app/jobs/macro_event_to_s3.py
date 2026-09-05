@@ -36,6 +36,7 @@ def _load_project_env() -> None:
 
 _load_project_env()
 
+
 def _build_spark() -> SparkSession:
     endpoint = f"s3.{DEFAULT_AWS_REGION}.amazonaws.com"
 
@@ -55,7 +56,8 @@ def _build_spark() -> SparkSession:
             .config("spark.hadoop.fs.s3a.secret.key", secret_key)
         )
     else:
-        print("[manual_macro] WARNING: AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY not set in env")
+        print(
+            "[manual_macro] WARNING: AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY not set in env")
 
     spark = builder.getOrCreate()
     print(f"[manual_macro] Spark S3A endpoint = {endpoint}")
@@ -65,7 +67,8 @@ def _build_spark() -> SparkSession:
 def main():
     spark = _build_spark()
 
-    events_path = (CURRENT_FILE.parents[3] / "data" / "manual_macro_events.jsonl").as_posix()
+    events_path = (
+        CURRENT_FILE.parents[3] / "data" / "manual_macro_events.jsonl").as_posix()
     print(f"[manual_macro] Reading events from {events_path}")
 
     df = spark.read.json(events_path)

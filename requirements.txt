@@ -10,3 +10,5 @@ matplotlib
 numpy
 pandas
 statsmodels
+scipy>=1.13
+pyarrow>=15

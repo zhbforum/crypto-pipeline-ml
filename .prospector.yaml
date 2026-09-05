@@ -1,0 +1,3 @@
+# This project does not use Django or Flask. Avoid detecting frameworks from
+# optional/transitive dependencies; retain Prospector's default lint checks.
+autodetect: false

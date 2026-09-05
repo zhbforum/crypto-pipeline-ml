@@ -60,7 +60,8 @@ def run_descriptive_analysis(
     csv_path: Optional[str | Path] = None,
     log_returns: bool = True,
 ) -> DescriptiveStats:
-    returns = load_btc_daily_returns(csv_path=csv_path, log_returns=log_returns)
+    returns = load_btc_daily_returns(
+        csv_path=csv_path, log_returns=log_returns)
     stats = compute_descriptive_stats(returns)
 
     print("Descriptive statistics for BTC daily returns")

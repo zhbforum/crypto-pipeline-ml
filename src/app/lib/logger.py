@@ -8,6 +8,7 @@ root = logging.getLogger()
 if not root.handlers:
     logging.basicConfig(level=_LEVEL, format=_FMT)
 
+
 def get_logger(name: str) -> logging.Logger:
     lg = logging.getLogger(name)
     lg.setLevel(_LEVEL)

@@ -24,7 +24,8 @@ BINANCE_BASE: Final[str] = os.getenv("BINANCE_BASE", "https://api.binance.com")
 SINK: Final[str] = os.getenv("SINK", "csv+kafka")
 
 KAFKA_TOPIC: Final[str] = os.getenv("KAFKA_TOPIC", "topic_0")
-CLIENT_PROPERTIES_PATH: Final[str] = os.getenv("CLIENT_PROPERTIES_PATH", "./config/client.properties")
+CLIENT_PROPERTIES_PATH: Final[str] = os.getenv(
+    "CLIENT_PROPERTIES_PATH", "./config/client.properties")
 
 _env_flag = os.getenv("KAFKA_ENABLED")
 KAFKA_ENABLED: Final[bool] = (
@@ -46,6 +47,7 @@ _INTERVAL_MAP_SECONDS: Final[Dict[str, int]] = {
     "12h": 12 * 60 * 60,
     "1d": 24 * 60 * 60,
 }
+
 
 def interval_seconds(interval: str) -> int:
     val = _INTERVAL_MAP_SECONDS.get(interval)
@@ -73,4 +75,4 @@ AWS_ACCESS_KEY_ID: Final[str] = os.getenv("AWS_ACCESS_KEY_ID", "")
 AWS_SECRET_ACCESS_KEY: Final[str] = os.getenv("AWS_SECRET_ACCESS_KEY", "")
 
 FORECAST_START_DS = "2025-11-01"
-FORECAST_END_DS = "2025-11-30"    
+FORECAST_END_DS = "2025-11-30"
