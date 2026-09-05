@@ -1,20 +1,10 @@
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
 import matplotlib.pyplot as plt
 import numpy as np
 import streamlit as st
 import pandas as pd
-
-ROOT = Path(__file__).resolve()
-for parent in ROOT.parents:
-    if (parent / "app").is_dir():
-        ROOT = parent
-        break
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
+from scipy import stats as sp_stats
 
 from app.analytics.dataset import load_btc_daily_close, load_btc_daily_returns
 from app.analytics.descriptive_stats import compute_descriptive_stats
@@ -128,8 +118,8 @@ elif page == "Розподіл і хвости":
         )
 
     ks_results = kolmogorov_smirnov_tests(returns)
-    ks_norm_D, ks_norm_p = ks_results["normal"]
-    ks_t_D, ks_t_p = ks_results["student_t"]
+    ks_norm_d, ks_norm_p = ks_results["normal"]
+    ks_t_d, ks_t_p = ks_results["student_t"]
 
     chi2_stat, chi2_p, counts_chi, exp_counts_chi, bin_edges_chi = chi_square_normal(
         returns, bins=40
@@ -142,8 +132,10 @@ elif page == "Розподіл і хвости":
 
     with col_ks:
         st.markdown("#### Критерій Колмогорова–Смирнова")
-        st.write(f"Нормальний: D = **{ks_norm_D:.4f}**, p-value = **{ks_norm_p:.4g}**")
-        st.write(f"t-розподіл: D = **{ks_t_D:.4f}**, p-value = **{ks_t_p:.4g}**")
+        st.write(
+            f"Нормальний: D = **{ks_norm_d:.4f}**, p-value = **{ks_norm_p:.4g}**")
+        st.write(
+            f"t-розподіл: D = **{ks_t_d:.4f}**, p-value = **{ks_t_p:.4g}**")
 
     with col_chi:
         st.markdown("#### Критерій χ² Пірсона (проти Normal)")
@@ -161,8 +153,6 @@ elif page == "Розподіл і хвости":
     x_min = float(bin_edges[0])
     x_max = float(bin_edges[-1])
     x = np.linspace(x_min, x_max, 1000)
-
-    from scipy import stats as sp_stats
 
     pdf_norm = sp_stats.norm.pdf(x, loc=mu, scale=sigma)
     pdf_t = sp_stats.t.pdf((x - loc_t) / scale_t, df_t) / scale_t
@@ -330,8 +320,10 @@ elif page == "Прогноз ARIMA":
 
     fig, ax = plt.subplots(figsize=(10, 4))
 
-    ax.plot(history_x, history_y_pct, label="Історія (останні 250 днів)", linewidth=1)
-    ax.plot(future_x, fc_mean_pct, label="Прогноз середньої дохідності", linewidth=2)
+    ax.plot(history_x, history_y_pct,
+            label="Історія (останні 250 днів)", linewidth=1)
+    ax.plot(future_x, fc_mean_pct,
+            label="Прогноз середньої дохідності", linewidth=2)
 
     ax.fill_between(
         future_x,
@@ -389,8 +381,8 @@ elif page == "Дисперсійний аналіз":
         "підвищення ставки (hike), зниження (cut), без змін (hold)."
     )
 
-    colA, colB, colC = st.columns(3)
-    with colA:
+    col_a, col_b, col_c = st.columns(3)
+    with col_a:
         mode_ui = st.selectbox(
             "Метрика impact",
             options=["post_k_days", "event_day", "pre_k_days"],
@@ -401,9 +393,9 @@ elif page == "Дисперсійний аналіз":
                 "pre_k_days: кумулятивна дохідність за K днів ДО рішення"
             ),
         )
-    with colB:
+    with col_b:
         k = st.slider("K (днів)", min_value=1, max_value=14, value=3)
-    with colC:
+    with col_c:
         require_full_window = st.checkbox(
             "Вимагати повне вікно (K днів)",
             value=True,
@@ -426,7 +418,8 @@ elif page == "Дисперсійний аналіз":
         st.write(f"{fed_result.p_value:.4g}")
     with col3:
         st.markdown("**Levene p-value**")
-        st.write("—" if fed_result.levene_p_value is None else f"{fed_result.levene_p_value:.4g}")
+        st.write(
+            "—" if fed_result.levene_p_value is None else f"{fed_result.levene_p_value:.4g}")
     with col4:
         st.markdown("**eta²**")
         st.write("—" if fed_result.eta2 is None else f"{fed_result.eta2:.4g}")
@@ -460,7 +453,8 @@ elif page == "Дисперсійний аналіз":
 
     order = ["cut", "hike", "hold"]
     for g in order:
-        vals = impacts.loc[impacts["group"] == g, "impact"].to_numpy(dtype=float)
+        vals = impacts.loc[impacts["group"] ==
+                           g, "impact"].to_numpy(dtype=float)
         if vals.size == 0:
             continue
         ax_hist.hist(vals, bins=20, alpha=0.5, label=f"{g} (n={vals.size})")
@@ -485,7 +479,6 @@ elif page == "Дисперсійний аналіз":
             "виявлено статистично значущі відмінності між групами hike/cut/hold "
             "за обраною метрикою impact."
         )
-
 
 
 elif page == "Моделювання Монте-Карло":

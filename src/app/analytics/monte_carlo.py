@@ -26,6 +26,7 @@ def simulate_paths_student_t(
     df: float,
     loc: float,
     scale: float,
+    *,
     horizon_days: int,
     n_paths: int,
     random_state: Optional[int] = None,
@@ -50,6 +51,7 @@ def analyze_scenario(
     df: float,
     loc: float,
     scale: float,
+    *,
     horizon_days: int = 30,
     n_paths: int = 10_000,
 ) -> MonteCarloResult:
@@ -162,7 +164,8 @@ def run_monte_carlo_analysis(
     )
 
     output_dir = Path(__file__).resolve().parent / "data"
-    plot_path = plot_monte_carlo_hist(baseline, improved, output_dir=output_dir)
+    plot_path = plot_monte_carlo_hist(
+        baseline, improved, output_dir=output_dir)
 
     print("Monte Carlo analysis for 30-day BTC returns")
     print(f"Initial price S0 = {s0:.2f} USDT\n")

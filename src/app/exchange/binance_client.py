@@ -5,8 +5,10 @@ from typing import Any, Dict, Optional
 
 class BinanceClient:
     def __init__(self, base_url: str, max_concurrency: int, user_agent: str = "crypto-pipeline/1.0"):
-        limits = httpx.Limits(max_keepalive_connections=max_concurrency, max_connections=max_concurrency)
-        self._client = httpx.AsyncClient(base_url=base_url, limits=limits, headers={"User-Agent": user_agent})
+        limits = httpx.Limits(
+            max_keepalive_connections=max_concurrency, max_connections=max_concurrency)
+        self._client = httpx.AsyncClient(base_url=base_url, limits=limits, headers={
+                                         "User-Agent": user_agent})
 
     async def bulk_tickers(self) -> Dict[str, float]:
         r = await self._client.get("/api/v3/ticker/price", timeout=10)

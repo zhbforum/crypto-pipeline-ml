@@ -52,7 +52,7 @@ def plot_arima_forecast(
 
     output_path = output_dir / "arima_forecast.png"
 
-    history_x = series.index.to_numpy() 
+    history_x = series.index.to_numpy()
     history_y = series.to_numpy(dtype=float)
 
     last_index = series.index[-1]
@@ -61,7 +61,7 @@ def plot_arima_forecast(
         periods=len(forecast) + 1,
         freq="D",
     )[1:]
-    future_x = future_index.to_numpy()  
+    future_x = future_index.to_numpy()
 
     fig, ax = plt.subplots(figsize=(10, 6))
     ax.plot(history_x, history_y, label="History")
@@ -96,5 +96,6 @@ def run_arima_analysis() -> None:
     forecast, conf_int = forecast_arima(model, periods=14)
 
     output_dir = Path(__file__).resolve().parent / "data"
-    plot_path = plot_arima_forecast(clean, forecast, conf_int, output_dir=output_dir)
+    plot_path = plot_arima_forecast(
+        clean, forecast, conf_int, output_dir=output_dir)
     print(f"Saved ARIMA forecast plot to: {plot_path}")

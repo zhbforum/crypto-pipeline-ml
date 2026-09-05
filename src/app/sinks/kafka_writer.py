@@ -35,7 +35,8 @@ def _ensure_topic(conf: Dict[str, str], topic: str, partitions: int = 3, replica
     if topic in md.topics and md.topics[topic].error is None:
         return
 
-    fs = admin.create_topics([NewTopic(topic, num_partitions=partitions, replication_factor=replication)])
+    fs = admin.create_topics(
+        [NewTopic(topic, num_partitions=partitions, replication_factor=replication)])
     f = fs[topic]
     try:
         f.result(timeout=timeout_s)
@@ -56,7 +57,8 @@ class KafkaWriter:
     def from_properties(cls, properties_path: str | Path, topic: str) -> "KafkaWriter":
         conf = _load_properties(Path(properties_path))
         conf.setdefault("client.id", "crypto-pipeline")
-        print(f"[kafka] bootstrap={conf.get('bootstrap.servers')} topic={topic}")
+        print(
+            f"[kafka] bootstrap={conf.get('bootstrap.servers')} topic={topic}")
         try:
             _ensure_topic(conf, topic, partitions=3, replication=3)
         except Exception as e:
@@ -81,7 +83,8 @@ class KafkaWriter:
             payload = json.dumps(r).encode("utf-8")
             while True:
                 try:
-                    self._p.produce(self._topic, payload, key=str(key), callback=self._on_delivery)
+                    self._p.produce(self._topic, payload, key=str(
+                        key), callback=self._on_delivery)
                     break
                 except BufferError:
                     self._p.poll(0.2)

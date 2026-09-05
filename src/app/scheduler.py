@@ -7,22 +7,17 @@ from app.timeutil import interval_seconds, sleep_until_next_boundary
 from app.exchange.binance_client import BinanceClient
 from app.sinks.csv_sink import CsvSink
 from app.services.collector import CollectorService
-# from app.sinks.kafka_writer import KafkaWriter   
 from app.constants import (
     MODE,
     INTERVAL,
     PAIRS,
     EVERY_SEC,
-    OUT_DIR,              
+    OUT_DIR,
     CONCURRENCY,
     BINANCE_BASE,
-    # KAFKA_ENABLED,      
-    # KAFKA_TOPIC,
-    # CLIENT_PROPERTIES_PATH,
 )
 
-DATA_DIR = Path("data")
-DATA_DIR.mkdir(parents=True, exist_ok=True)
+DATA_DIR = Path(OUT_DIR)
 
 
 async def run() -> None:
@@ -41,30 +36,23 @@ async def run() -> None:
     else:
         sink = CsvSink(
             DATA_DIR / f"binance_kline_{INTERVAL}.csv",
-            ["ts", "iso_ts", "symbol", "interval", "open", "high", "low", "close", "volume"],
+            ["ts", "iso_ts", "symbol", "interval",
+                "open", "high", "low", "close", "volume"],
         )
 
-    # kafka_writer = KafkaWriter.from_properties(CLIENT_PROPERTIES_PATH, KAFKA_TOPIC) if KAFKA_ENABLED else None
-
-    cycle = 0
     if MODE == "kline":
         await sleep_until_next_boundary(interval_seconds(INTERVAL))
 
     try:
         while True:
-            cycle += 1
             t0 = asyncio.get_event_loop().time()
 
             if MODE == "ticker":
-                ok, fail, wrote_csv, rows = await svc.one_cycle_ticker(PAIRS, sink)
+                ok, fail, wrote_csv, _ = await svc.one_cycle_ticker(PAIRS, sink)
             elif MODE == "kline":
-                ok, fail, wrote_csv, rows = await svc.one_cycle_kline(PAIRS, INTERVAL, sink, CONCURRENCY)
+                ok, fail, wrote_csv, _ = await svc.one_cycle_kline(PAIRS, INTERVAL, sink, CONCURRENCY)
             else:
-                ok, fail, wrote_csv, rows = 0, len(PAIRS), 0, []
-
-            # sent_to_kafka = 0
-            # if kafka_writer and rows:
-            #     sent_to_kafka = kafka_writer.send_batch(rows)
+                ok, fail, wrote_csv = 0, len(PAIRS), 0
 
             dt = asyncio.get_event_loop().time() - t0
             extra = f" {INTERVAL}" if MODE == "kline" else ""

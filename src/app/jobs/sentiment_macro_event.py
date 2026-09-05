@@ -142,7 +142,8 @@ def main() -> None:
         .csv(base_path)
     )
 
-    print(f"[sentiment_macro_event] Written {total} events under source=macro_sentiment to {base_path}")
+    print(
+        f"[sentiment_macro_event] Written {total} events under source=macro_sentiment to {base_path}")
     spark.stop()
 
 

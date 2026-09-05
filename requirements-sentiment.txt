@@ -1,0 +1,4 @@
+# Optional dependencies for the Truth Social / FinBERT scripts.
+torch>=2.2,<3
+transformers>=4.40,<5
+huggingface-hub>=0.23,<1

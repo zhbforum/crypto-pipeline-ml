@@ -63,7 +63,7 @@ def load_fed_rate_events(path: Path | str = FED_RATE_EVENTS_PATH) -> pd.DataFram
 def _cum_return(returns: pd.Series, start_i: int, end_i: int) -> float:
     if start_i > end_i:
         return np.nan
-    seg = returns.iloc[start_i : end_i + 1].astype(float)
+    seg = returns.iloc[start_i: end_i + 1].astype(float)
     seg = seg.dropna()
     if seg.empty:
         return np.nan
@@ -86,13 +86,12 @@ def build_event_impacts(
     clean = clean[~clean.index.duplicated(keep="last")]
 
     events = load_fed_rate_events()
-    events = events[events["decision_class"].isin(["hike", "cut", "hold"])].copy()
+    events = events[events["decision_class"].isin(
+        ["hike", "cut", "hold"])].copy()
 
     idx_map = {d: i for i, d in enumerate(clean.index.to_list())}
 
     rows: list[dict] = []
-    n = len(clean)
-
     for _, e in events.iterrows():
         d = pd.to_datetime(e["event_date"]).normalize()
         if d not in idx_map:
@@ -106,10 +105,10 @@ def build_event_impacts(
         elif mode == "post_k_days":
             start_i = i + 1
             end_i = i + k
-            if require_full_window and (start_i >= n or end_i >= n):
+            if require_full_window and (start_i >= len(clean) or end_i >= len(clean)):
                 continue
-            start_i = min(start_i, n - 1)
-            end_i = min(end_i, n - 1)
+            start_i = min(start_i, len(clean) - 1)
+            end_i = min(end_i, len(clean) - 1)
             impact = _cum_return(clean, start_i, end_i)
 
         elif mode == "pre_k_days":
@@ -145,6 +144,17 @@ def build_event_impacts(
     return out
 
 
+def _anova_effect_size(impacts: pd.DataFrame, groups: list[np.ndarray]) -> float:
+    grand_mean = float(np.mean(impacts["impact"].to_numpy(dtype=float)))
+    ss_between = sum(
+        float(arr.size) * (float(np.mean(arr)) - grand_mean) ** 2
+        for arr in groups
+    )
+    ss_total = float(
+        np.sum((impacts["impact"].to_numpy(dtype=float) - grand_mean) ** 2))
+    return (ss_between / ss_total) if ss_total > 0 else np.nan
+
+
 def compute_fed_rate_anova(
     returns: pd.Series,
     *,
@@ -152,7 +162,7 @@ def compute_fed_rate_anova(
     k: int = 3,
     require_full_window: bool = True,
 ) -> Tuple[FedRateAnovaResult, pd.DataFrame, pd.DataFrame]:
-    
+
     impacts = build_event_impacts(
         returns,
         mode=mode,
@@ -173,13 +183,15 @@ def compute_fed_rate_anova(
     groups: list[np.ndarray] = []
     levels: List[str] = []
     for g in ["hike", "cut", "hold"]:
-        data = impacts.loc[impacts["group"] == g, "impact"].to_numpy(dtype=float)
+        data = impacts.loc[impacts["group"] ==
+                           g, "impact"].to_numpy(dtype=float)
         if data.size >= 2:
             levels.append(g)
             groups.append(data)
 
     if len(groups) < 2:
-        raise ValueError("Для ANOVA потрібно принаймні дві групи з >=2 спостереженнями")
+        raise ValueError(
+            "Для ANOVA потрібно принаймні дві групи з >=2 спостереженнями")
 
     levene_p = None
     try:
@@ -190,12 +202,7 @@ def compute_fed_rate_anova(
 
     f_stat, p_val = stats.f_oneway(*groups)
 
-    grand_mean = float(np.mean(impacts["impact"].to_numpy(dtype=float)))
-    ss_between = 0.0
-    for g, arr in zip(levels, groups):
-        ss_between += float(arr.size) * (float(np.mean(arr)) - grand_mean) ** 2
-    ss_total = float(np.sum((impacts["impact"].to_numpy(dtype=float) - grand_mean) ** 2))
-    eta2 = (ss_between / ss_total) if ss_total > 0 else np.nan
+    eta2 = _anova_effect_size(impacts, groups)
 
     result = FedRateAnovaResult(
         levels=levels,
@@ -215,7 +222,8 @@ def compute_fed_rate_anova(
 def run_fed_rate_anova_analysis() -> None:
     returns = load_btc_daily_returns()
 
-    result, summary, impacts = compute_fed_rate_anova(returns, mode="post_k_days", k=3)
+    result, summary, _ = compute_fed_rate_anova(
+        returns, mode="post_k_days", k=3)
 
     print("ANOVA (Fed rate decision: hike/cut/hold) → impact BTC")
     print(f"Mode: {result.mode}, k={result.k}")

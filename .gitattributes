@@ -1,0 +1,8 @@
+# Keep source and configuration line endings consistent across Windows and CI.
+* text=auto
+*.py text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.md text eol=lf
+*.txt text eol=lf
+.gitignore text eol=lf

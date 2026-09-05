@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from typing import Final
 from pathlib import Path
 
@@ -9,6 +10,7 @@ from pmdarima import auto_arima
 from pyspark import SparkConf
 from pyspark.sql import SparkSession, functions as F, types as T
 
+from app import constants as defaults
 from app.lib.logger import get_logger
 
 
@@ -18,27 +20,18 @@ def _load_project_env() -> None:
     if env_path.is_file():
         load_dotenv(env_path)
     else:
-        print(f"[WARN] .env not found in {root}, AWS creds may be empty")
+        load_dotenv(root / ".env")
 
 
-_load_project_env()
+def _setting(name: str) -> str:
+    return os.getenv(name, getattr(defaults, name))
 
-from app.constants import (  
-    DAILY_AGG_PATH,
-    DAILY_FORECAST_PATH,
-    SPARK_PACKAGES,
-    AWS_DEFAULT_REGION,
-    AWS_ACCESS_KEY_ID,
-    AWS_SECRET_ACCESS_KEY,
-    FORECAST_START_DS,
-    FORECAST_END_DS,
-)
 
 logger = get_logger(__name__)
 
 
 def build_spark(app_name: str = "s3-daily-forecast") -> SparkSession:
-    if not AWS_ACCESS_KEY_ID or not AWS_SECRET_ACCESS_KEY:
+    if not _setting("AWS_ACCESS_KEY_ID") or not _setting("AWS_SECRET_ACCESS_KEY"):
         raise RuntimeError(
             "AWS credentials are empty. "
             "Check .env in project root (AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY)."
@@ -51,18 +44,19 @@ def build_spark(app_name: str = "s3-daily-forecast") -> SparkSession:
         .set("spark.sql.sources.partitionOverwriteMode", "dynamic")
     )
 
-    if SPARK_PACKAGES:
-        conf = conf.set("spark.jars.packages", SPARK_PACKAGES)
+    if _setting("SPARK_PACKAGES"):
+        conf = conf.set("spark.jars.packages", _setting("SPARK_PACKAGES"))
 
     conf = (
-        conf.set("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem")
+        conf.set("spark.hadoop.fs.s3a.impl",
+                 "org.apache.hadoop.fs.s3a.S3AFileSystem")
         .set(
             "spark.hadoop.fs.s3a.aws.credentials.provider",
             "org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider",
         )
-        .set("spark.hadoop.fs.s3a.access.key", AWS_ACCESS_KEY_ID)
-        .set("spark.hadoop.fs.s3a.secret.key", AWS_SECRET_ACCESS_KEY)
-        .set("spark.hadoop.fs.s3a.endpoint", f"s3.{AWS_DEFAULT_REGION}.amazonaws.com")
+        .set("spark.hadoop.fs.s3a.access.key", _setting("AWS_ACCESS_KEY_ID"))
+        .set("spark.hadoop.fs.s3a.secret.key", _setting("AWS_SECRET_ACCESS_KEY"))
+        .set("spark.hadoop.fs.s3a.endpoint", f"s3.{_setting('AWS_DEFAULT_REGION')}.amazonaws.com")
     )
 
     spark = SparkSession.builder.config(conf=conf).getOrCreate()
@@ -93,7 +87,7 @@ def _fit_arima_and_forecast_next(y: pd.Series) -> float | None:
             error_action="ignore",
         )
         return float(model.predict(n_periods=1)[0])
-    except Exception as exc:  
+    except Exception as exc:
         logger.exception("ARIMA fit/predict failed: %s", exc)
         return None
 
@@ -109,7 +103,8 @@ def forecast_next_day(pdf: pd.DataFrame) -> pd.DataFrame:
     if y_hat is None:
         return pd.DataFrame(columns=["symbol", "ds", "y_hat_close"])
 
-    next_ds = (pd.to_datetime(pdf["ds"].iloc[-1]) + pd.Timedelta(days=1)).date()
+    next_ds = (pd.to_datetime(pdf["ds"].iloc[-1]
+                              ) + pd.Timedelta(days=1)).date()
 
     return pd.DataFrame(
         {
@@ -127,13 +122,13 @@ def forecast_for_period(pdf: pd.DataFrame) -> pd.DataFrame:
     pdf = pdf.sort_values("ds").copy()
     symbol = str(pdf["symbol"].iloc[0])
 
-    if not FORECAST_START_DS or not FORECAST_END_DS:
+    if not _setting("FORECAST_START_DS") or not _setting("FORECAST_END_DS"):
         return forecast_next_day(pdf)
 
     try:
-        start_date = pd.to_datetime(FORECAST_START_DS).date()
-        end_date = pd.to_datetime(FORECAST_END_DS).date()
-    except Exception as exc:  
+        start_date = pd.to_datetime(_setting("FORECAST_START_DS")).date()
+        end_date = pd.to_datetime(_setting("FORECAST_END_DS")).date()
+    except Exception as exc:
         logger.exception("Invalid FORECAST_*_DS values: %s", exc)
         return pd.DataFrame(columns=["symbol", "ds", "y_hat_close"])
 
@@ -167,14 +162,15 @@ def forecast_for_period(pdf: pd.DataFrame) -> pd.DataFrame:
 
 
 def run() -> None:
+    _load_project_env()
     spark = build_spark()
-    logger.info("Reading minute klines from %s", DAILY_AGG_PATH)
+    logger.info("Reading minute klines from %s", _setting("DAILY_AGG_PATH"))
 
     raw_df = (
         spark.read.format("csv")
         .option("header", True)
         .option("inferSchema", True)
-        .load(DAILY_AGG_PATH)
+        .load(_setting("DAILY_AGG_PATH"))
     )
 
     logger.info("Loaded columns: %s", raw_df.columns)
@@ -183,7 +179,8 @@ def run() -> None:
 
     missing = required_cols - set(raw_df.columns)
     if missing:
-        raise ValueError(f"Missing expected columns {missing}, got: {raw_df.columns}")
+        raise ValueError(
+            f"Missing expected columns {missing}, got: {raw_df.columns}")
 
     df = raw_df.select("iso_ts", "symbol", "close").withColumn(
         "ds", F.to_timestamp("iso_ts").cast("date")
@@ -203,17 +200,17 @@ def run() -> None:
         .withColumn("created_at", F.current_timestamp())
     )
 
-    if FORECAST_START_DS and FORECAST_END_DS:
+    if _setting("FORECAST_START_DS") and _setting("FORECAST_END_DS"):
         logger.info(
             "Joining forecasts with actual close for period %s to %s",
-            FORECAST_START_DS,
-            FORECAST_END_DS,
+            _setting("FORECAST_START_DS"),
+            _setting("FORECAST_END_DS"),
         )
 
         actuals_df = (
             daily_df.filter(
-                (F.col("ds") >= F.lit(FORECAST_START_DS).cast("date"))
-                & (F.col("ds") <= F.lit(FORECAST_END_DS).cast("date"))
+                (F.col("ds") >= F.lit(_setting("FORECAST_START_DS")).cast("date"))
+                & (F.col("ds") <= F.lit(_setting("FORECAST_END_DS")).cast("date"))
             )
             .select("symbol", "ds", "close")
             .withColumnRenamed("close", "actual_close")
@@ -245,7 +242,7 @@ def run() -> None:
             )
         )
 
-    logger.info("Writing forecasts to %s", DAILY_FORECAST_PATH)
+    logger.info("Writing forecasts to %s", _setting("DAILY_FORECAST_PATH"))
 
     (
         forecast_df.repartition("ds", "symbol")
@@ -253,7 +250,7 @@ def run() -> None:
         .option("header", True)
         .option("compression", "none")
         .partitionBy("ds", "symbol")
-        .csv(DAILY_FORECAST_PATH)
+        .csv(_setting("DAILY_FORECAST_PATH"))
     )
 
     logger.info("Forecast job finished successfully.")

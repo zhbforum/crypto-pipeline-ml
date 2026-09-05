@@ -106,7 +106,8 @@ def load_config() -> AppConfig:
         s3_bucket=s3_bucket,
         s3_prefix=s3_prefix,
         aws_region=aws_region,
-        batch_write_size=int(os.getenv("BATCH_WRITE_SIZE", str(BATCH_WRITE_SIZE))),
+        batch_write_size=int(
+            os.getenv("BATCH_WRITE_SIZE", str(BATCH_WRITE_SIZE))),
     )
 
 
@@ -122,12 +123,16 @@ class FinBertSentiment:
     def __init__(self, model_dir: Path) -> None:
         if not model_dir.exists():
             raise FileNotFoundError(f"FinBERT dir not found: {model_dir}")
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.tokenizer = AutoTokenizer.from_pretrained(str(model_dir), use_fast=True)
-        self.model = AutoModelForSequenceClassification.from_pretrained(str(model_dir))
+        self.device = torch.device(
+            "cuda" if torch.cuda.is_available() else "cpu")
+        self.tokenizer = AutoTokenizer.from_pretrained(
+            str(model_dir), use_fast=True)
+        self.model = AutoModelForSequenceClassification.from_pretrained(
+            str(model_dir))
         self.model.eval()
         self.model.to(self.device)
-        self.id2label = {int(k): v.lower() for k, v in self.model.config.id2label.items()}
+        self.id2label = {int(k): v.lower()
+                         for k, v in self.model.config.id2label.items()}
 
     @torch.no_grad()
     def predict(self, text: str) -> Dict[str, Any]:
@@ -146,16 +151,19 @@ class FinBertSentiment:
 
         probs_all: List[torch.Tensor] = []
         for i in range(0, input_ids.size(0), FINBERT_BATCH_SIZE):
-            ids = input_ids[i : i + FINBERT_BATCH_SIZE].to(self.device)
-            mask = attention_mask[i : i + FINBERT_BATCH_SIZE].to(self.device)
+            ids = input_ids[i: i + FINBERT_BATCH_SIZE].to(self.device)
+            mask = attention_mask[i: i + FINBERT_BATCH_SIZE].to(self.device)
             logits = self.model(input_ids=ids, attention_mask=mask).logits
             probs_all.append(torch.softmax(logits, dim=-1).cpu())
 
         probs_mean = torch.cat(probs_all, dim=0).mean(dim=0)
 
+        return self._sentiment_from_probabilities(probs_mean)
+
+    def _sentiment_from_probabilities(self, probabilities: torch.Tensor) -> Dict[str, Any]:
         probs_dict: Dict[str, float] = {
             self.id2label.get(idx, str(idx)): float(p)
-            for idx, p in enumerate(probs_mean.tolist())
+            for idx, p in enumerate(probabilities.tolist())
         }
 
         pos = float(probs_dict.get("positive", 0.0))
@@ -364,12 +372,14 @@ def write_events_to_s3_in_batches(
 
 
 def main() -> None:
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s - %(message)s")
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s - %(message)s")
     load_dotenv()
 
     cfg = load_config()
     if not cfg.jsonl_path.exists():
-        raise FileNotFoundError(f"Local jsonl file not found: {cfg.jsonl_path}")
+        raise FileNotFoundError(
+            f"Local jsonl file not found: {cfg.jsonl_path}")
     if not cfg.finbert_dir.exists():
         raise FileNotFoundError(f"FinBERT dir not found: {cfg.finbert_dir}")
 
@@ -377,7 +387,8 @@ def main() -> None:
     spark = init_spark(cfg.aws_region)
     output_path = build_output_path(cfg.s3_bucket, cfg.s3_prefix)
 
-    events_iter, stats = iter_economic_events(iter_jsonl_records(cfg.jsonl_path), finbert)
+    events_iter, stats = iter_economic_events(
+        iter_jsonl_records(cfg.jsonl_path), finbert)
     written = write_events_to_s3_in_batches(
         spark=spark,
         events=events_iter,

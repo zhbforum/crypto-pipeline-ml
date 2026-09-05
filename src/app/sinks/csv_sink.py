@@ -15,7 +15,8 @@ class CsvSink:
             return 0
         is_new = not self.path.exists()
         with open(self.path, "a", newline="", encoding="utf-8") as f:
-            w = csv.DictWriter(f, fieldnames=self.columns, extrasaction="ignore")
+            w = csv.DictWriter(f, fieldnames=self.columns,
+                               extrasaction="ignore")
             if is_new:
                 w.writeheader()
             w.writerows(rows)

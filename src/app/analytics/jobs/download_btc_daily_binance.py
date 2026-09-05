@@ -33,7 +33,7 @@ def fetch_klines(
     return data
 
 
-def main() -> None:
+def _download_rows() -> List[tuple[str, float]]:
     utc = dt.timezone.utc
     start_dt = dt.datetime(2017, 1, 1, tzinfo=utc)
     end_dt = dt.datetime.now(tz=utc)
@@ -52,17 +52,7 @@ def main() -> None:
         if not data:
             break
 
-        for entry in data:
-            open_time_ms = int(entry[0])
-            close_price_str = entry[4]
-            close_price = float(close_price_str)
-
-            open_dt = dt.datetime.fromtimestamp(
-                open_time_ms / 1000.0,
-                tz=utc,
-            )
-            date_str = open_dt.date().isoformat()
-            all_rows.append((date_str, close_price))
+        all_rows.extend(_normalize_rows(data))
 
         last_open_time_ms = int(data[-1][0])
         current_ms = last_open_time_ms + 1
@@ -72,6 +62,23 @@ def main() -> None:
     if not all_rows:
         raise RuntimeError("No data fetched from Binance API")
 
+    return all_rows
+
+
+def _normalize_rows(data: list) -> List[tuple[str, float]]:
+    return [
+        (
+            dt.datetime.fromtimestamp(
+                int(entry[0]) / 1000.0, tz=dt.timezone.utc)
+            .date().isoformat(),
+            float(entry[4]),
+        )
+        for entry in data
+    ]
+
+
+def main() -> None:
+    all_rows = _download_rows()
     seen_dates = set()
     dedup_rows: List[tuple[str, float]] = []
     for date_str, close_price in all_rows:

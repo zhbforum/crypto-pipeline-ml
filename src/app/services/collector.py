@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from app.exchange.binance_client import BinanceClient
 import asyncio
 
+
 class CollectorService:
     def __init__(self, client: BinanceClient):
         self.client = client
@@ -17,7 +18,8 @@ class CollectorService:
         try:
             all_prices = await self.client.bulk_tickers()
             now_ms = int(time.time() * 1000)
-            iso = datetime.fromtimestamp(now_ms / 1000, tz=timezone.utc).isoformat()
+            iso = datetime.fromtimestamp(
+                now_ms / 1000, tz=timezone.utc).isoformat()
             for sym in pairs:
                 price = all_prices.get(sym)
                 if price is None:
